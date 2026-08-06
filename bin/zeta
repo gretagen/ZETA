@@ -1,0 +1,3 @@
+#!/bin/sh
+# zeta launcher: runs the entry point with the system Lua interpreter.
+exec lua "$(dirname "$0")/../zeta.lua" "$@"
