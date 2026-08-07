@@ -15,13 +15,15 @@ local downloader
 
 -- GitHub serves raw file bytes from raw.githubusercontent.com, not from
 -- github.com (which returns HTML). Rewrite a github.com repo URL to its raw
--- equivalent using the "HEAD" ref, which resolves to the default branch, so
--- manifests, indexes, and payloads download as actual content.
+-- equivalent. We pin the ref to refs/heads/main instead of the symbolic
+-- "HEAD": the raw CDN caches the HEAD ref and can serve stale content long
+-- after a push (observed: manifest fetched via /HEAD still had a previous
+-- url). refs/heads/main is what the package manifests already use.
 function fetch.raw_github(url)
   url = url:gsub("^https?://www%.github%.com/", "https://github.com/")
   local owner, repo, rest = url:match("^https?://github%.com/([^/]+)/([^/]+)(.*)$")
   if owner and repo then
-    return "https://raw.githubusercontent.com/" .. owner .. "/" .. repo .. "/HEAD" .. rest
+    return "https://raw.githubusercontent.com/" .. owner .. "/" .. repo .. "/refs/heads/main" .. rest
   end
   return url
 end

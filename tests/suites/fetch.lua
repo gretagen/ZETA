@@ -9,22 +9,22 @@ local suite = lib.new_suite("fetch")
 suite:test("github.com manifest url is rewritten to raw", function()
   lib.assert_eq(
     fetch.raw_github("https://github.com/gretagen/zeta-packages/packages/hello/package.lua"),
-    "https://raw.githubusercontent.com/gretagen/zeta-packages/HEAD/packages/hello/package.lua")
+    "https://raw.githubusercontent.com/gretagen/zeta-packages/refs/heads/main/packages/hello/package.lua")
 end)
 
 suite:test("github.com repo root is rewritten too", function()
   lib.assert_eq(
     fetch.raw_github("https://github.com/gretagen/zeta-packages"),
-    "https://raw.githubusercontent.com/gretagen/zeta-packages/HEAD")
+    "https://raw.githubusercontent.com/gretagen/zeta-packages/refs/heads/main")
 end)
 
 suite:test("http and www github.com variants are rewritten", function()
   lib.assert_eq(
     fetch.raw_github("http://github.com/a/b/packages/x/package.lua"),
-    "https://raw.githubusercontent.com/a/b/HEAD/packages/x/package.lua")
+    "https://raw.githubusercontent.com/a/b/refs/heads/main/packages/x/package.lua")
   lib.assert_eq(
     fetch.raw_github("https://www.github.com/a/b/c.tgz"),
-    "https://raw.githubusercontent.com/a/b/HEAD/c.tgz")
+    "https://raw.githubusercontent.com/a/b/refs/heads/main/c.tgz")
 end)
 
 suite:test("non-github and local urls are unchanged", function()
