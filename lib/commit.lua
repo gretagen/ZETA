@@ -164,6 +164,26 @@ function commit.apply(staging, opts)
   end
 
   log.ok(("committed %d file(s) to %s"):format(#owned, root))
+
+  -- Auto-compile GSettings schemas if any were installed.
+  local schemas_dir = root .. "/usr/share/glib-2.0/schemas"
+  local has_schema = false
+  for _, e in ipairs(owned) do
+    if e.rel:match("^usr/share/glib%-2%.0/schemas/.+%.gschema%.xml$") then
+      has_schema = true
+      break
+    end
+  end
+  if has_schema then
+    local compile = "glib-compile-schemas " .. path.quote(schemas_dir)
+    log.step("compiling GSettings schemas")
+    if path.run(compile) then
+      log.ok("gschemas.compiled generated")
+    else
+      log.warn("glib-compile-schemas failed (non-fatal)")
+    end
+  end
+
   return owned
 end
 
