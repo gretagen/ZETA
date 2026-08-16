@@ -27,10 +27,11 @@ local cfg = config.load(here)
 log.info(("zeta (lua %s) root=%s repo=%s"):format(_VERSION, cfg.root, cfg.repo))
 
 local dispatch = {
-  provide = function(a, f) return actions.provide(a[1], f) end,
-  reprovide = function(a, f) return actions.reprovide(a[1], f) end,
-  localprovide = function(a, f) return actions.localprovide(a[1], f) end,
-  remove = function(a, f) return actions.remove(a[1], f) end,
+  provide = function(a, f) return actions.provide(a, f) end,
+  reprovide = function(a, f) return actions.reprovide(a, f) end,
+  localprovide = function(a, f) return actions.localprovide(a, f) end,
+  elevate = function(a, f) return actions.elevate(f) end,
+  remove = function(a, f) return actions.remove(a, f) end,
   list = function() return actions.list() end,
   localize = function(a) return actions.localize(a[1]) end,
   test = function(a, f) return actions.test(a[1], f) end,

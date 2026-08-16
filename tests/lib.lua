@@ -182,7 +182,9 @@ end
 
 local runs = 0
 
-function lib.run_zeta(args, env)
+-- Run the real zeta binary with a custom environment. `input`, when given,
+-- is piped to stdin (used to answer Y/N confirmation prompts).
+function lib.run_zeta(args, env, input)
   runs = runs + 1
   local out = path.join(lib.tmp_root, "out-" .. tostring(runs) .. ".txt")
   local code_file = out .. ".code"
@@ -196,7 +198,13 @@ function lib.run_zeta(args, env)
   -- Capture the exit status via $? rather than relying on os.execute, whose
   -- return value differs between Lua 5.1 (raw wait status, e.g. 256 for
   -- exit 1) and Lua 5.2+ (status, "exit"/"signal", code).
-  local full = table.concat(cmd, " ") .. " > " .. path.quote(out) .. " 2>&1"
+  local redir = " > " .. path.quote(out) .. " 2>&1"
+  if input then
+    local in_file = out .. ".in"
+    lib.write(in_file, input)
+    redir = redir .. " < " .. path.quote(in_file)
+  end
+  local full = table.concat(cmd, " ") .. redir
     .. "; echo $? > " .. path.quote(code_file)
   os.execute(full)
   local f = io.open(code_file, "rb")

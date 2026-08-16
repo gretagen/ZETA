@@ -1,4 +1,4 @@
--- spinner.lua -- a /-\- style progress spinner for blocking operations.
+-- spinner.lua -- a /-\| style progress spinner for blocking operations.
 --
 -- Long operations (network downloads) produce no output of their own, so a
 -- lightweight spinner keeps the terminal alive. It runs as a tiny background
@@ -11,7 +11,7 @@ local spinner = {}
 
 local path = require("path")
 
-local FRAMES = { "/", "-", "\\", "-" }
+local FRAMES = { "/", "-", "\\", "|" }
 
 local tty
 local active = false

@@ -108,19 +108,11 @@ function commit.apply(staging, opts)
     entries = filtered
   end
 
-  -- Ownership index for conflict detection (excluding this package itself,
-  -- which may legitimately overwrite its own previously installed files).
-  local owners = {}
-  for _, n in ipairs(db.list()) do
-    if n ~= opts.pkg_name then
-      for _, rel in ipairs(db.files(n)) do owners[rel] = n end
-    end
-  end
-
   local root = config.get().root
 
-  -- Pre-flight: enforcement scan + conflict check, BEFORE copying anything,
+  -- Pre-flight: enforcement scan BEFORE copying anything,
   -- so a bad package leaves the filesystem untouched.
+  -- File conflict checks are skipped: multiple packages may own the same file.
   local owned = {}
   for _, e in ipairs(entries) do
     if e.type ~= "dir" then
@@ -128,11 +120,6 @@ function commit.apply(staging, opts)
       if why then
         error(("refusing to install %q from %s: %s (Zeta is init- and distro-agnostic; init hooks and distro-identity files are never installed)"):format(
           e.rel, opts.pkg_name or "package", why), 0)
-      end
-      local who = owners[e.rel]
-      if who and not opts.force then
-        error(("file conflict: %s is already owned by installed package %s (use --force to override)"):format(
-          e.rel, who), 0)
       end
       owned[#owned + 1] = e
     end
@@ -153,8 +140,8 @@ function commit.apply(staging, opts)
       end
       log.detail(("installed symlink %s -> %s"):format(e.rel, e.target))
     else
-      if owners[e.rel] then
-        log.warn(("overwriting %q owned by %q"):format(e.rel, owners[e.rel]))
+      if path.exists(dest) then
+        log.detail(("overwriting existing %s"):format(e.rel))
       end
       if not path.run("cp -a " .. path.quote(src) .. " " .. path.quote(dest)) then
         error(("failed to install %q"):format(e.rel), 0)

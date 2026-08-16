@@ -2,8 +2,9 @@
 --
 -- Command tokens start with a single dash and match the documented forms
 -- (-Provide, -LocalProvide, -Remove, -List, -Localize, -Help, -ReProvide).
--- Matching is case-insensitive so -provide and -PROVIDE also work. Flags
--- start with a double dash (--pass, --force, --help).
+-- Match is case-insensitive so -provide and -PROVIDE also work. Flags
+-- start with a double dash (--pass, --force, --with-deps, --help).
+-- Install/remove commands accept one or more package names.
 
 local cli = {}
 
@@ -11,6 +12,7 @@ local COMMANDS = {
   provide = true,
   reprovide = true,
   localprovide = true,
+  elevate = true,
   remove = true,
   list = true,
   localize = true,
@@ -18,24 +20,29 @@ local COMMANDS = {
   help = true,
 }
 
--- Number of positional arguments each command requires.
+-- Number of positional arguments each command requires exactly.
 local ARITY = {
+  localize = 1,
+  test = 1,
+  list = 0,
+  elevate = 0,
+  help = 0,
+}
+
+-- Commands that accept one or more positional arguments.
+local MIN_ARGS = {
   provide = 1,
   reprovide = 1,
   localprovide = 1,
   remove = 1,
-  localize = 1,
-  test = 1,
-  list = 0,
-  help = 0,
 }
 
--- Returns { command = <string>, args = {..}, flags = { pass, force } }.
+-- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps } }.
 -- Returns nil, errmsg on any parse problem.
 function cli.parse(args)
   local cmd
   local pos = {}
-  local flags = { pass = false, force = false }
+  local flags = { pass = false, force = false, with_deps = false }
 
   for _, a in ipairs(args) do
     if a:match("^%-%-") then
@@ -44,6 +51,8 @@ function cli.parse(args)
         flags.pass = true
       elseif f == "force" then
         flags.force = true
+      elseif f == "with-deps" then
+        flags.with_deps = true
       elseif f == "help" then
         cmd = "help"
       else
@@ -69,9 +78,14 @@ function cli.parse(args)
   end
 
   local want = ARITY[cmd]
-  if #pos ~= want then
+  if want ~= nil and #pos ~= want then
     return nil, ("command -%s expects %d argument(s), got %d"):format(
       cmd:gsub("^.", string.upper), want, #pos)
+  end
+  local min = MIN_ARGS[cmd]
+  if min and #pos < min then
+    return nil, ("command -%s expects at least %d argument(s), got %d"):format(
+      cmd:gsub("^.", string.upper), min, #pos)
   end
 
   return { command = cmd, args = pos, flags = flags }

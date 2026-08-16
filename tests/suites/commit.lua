@@ -102,13 +102,8 @@ suite:test("cross-package file conflict aborts unless forced", function()
   lib.write(path.join(s, "usr/bin/shared"), "new")
   lib.write(path.join(s, "usr/bin/b"), "b")
 
-  local ok, err = pcall(commit.apply, s, { pkg_name = "B" })
-  lib.assert_false(ok)
-  lib.assert_contains(err, "file conflict")
-  -- nothing copied, A's file untouched
-  lib.assert_eq(lib.read(path.join(root, "usr/bin/shared")), "owned by A")
-
-  local forced = commit.apply(s, { pkg_name = "B", force = true })
+  -- Multi-ownership: B may install a file already owned by A without conflict.
+  local owned = commit.apply(s, { pkg_name = "B" })
   lib.assert_eq(lib.read(path.join(root, "usr/bin/shared")), "new")
   lib.assert_true(lib.exists(path.join(root, "usr/bin/b")))
 end)

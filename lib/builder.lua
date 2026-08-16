@@ -237,7 +237,10 @@ local function obtain_payload(p, manifest, local_dir)
   return got
 end
 
--- install(manifest, opts) -- opts: { force, source, local_dir }
+-- install(manifest, opts) -- opts: { force, source, local_dir, kind }
+-- opts.kind is "package" for an explicit install or "dependency" for an
+-- auto-installed dependency (see actions.lua); it decides which database
+-- registry the entry lands in.
 function builder.install(manifest, opts)
   opts = opts or {}
   local cfg = config.get()
@@ -301,7 +304,13 @@ function builder.install(manifest, opts)
     })
 
     manifest.source = opts.source or "remote"
-    db.record(name, manifest, owned_rels(owned))
+    db.record(name, manifest, owned_rels(owned), { kind = opts.kind })
+    -- Mirror this entry's deps into each dependency's dependents list so
+    -- -Remove knows what still requires it (covers deps installed earlier in
+    -- this run AND deps that were already present).
+    for _, d in ipairs(manifest.deps or {}) do
+      if db.is_installed(d.name) then db.add_dependent(d.name, name) end
+    end
   end)
 
   -- Always clean up staging + work dirs, even on failure.
