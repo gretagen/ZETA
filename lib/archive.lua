@@ -89,7 +89,7 @@ function archive.extract(archive_file, dest, opts)
   local ok, verr = archive.validate(entries)
   if not ok then return nil, verr end
   local strip = opts.strip or 0
-  local cmd = "tar -xf " .. path.quote(archive_file)
+  local cmd = "tar -xvf " .. path.quote(archive_file)
     .. " -C " .. path.quote(dest) .. " --no-same-owner"
   if strip > 0 then
     cmd = cmd .. " --strip-components=" .. tostring(strip)
