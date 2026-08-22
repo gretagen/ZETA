@@ -30,6 +30,7 @@ local dispatch = {
   provide = function(a, f) return actions.provide(a, f) end,
   reprovide = function(a, f) return actions.reprovide(a, f) end,
   localprovide = function(a, f) return actions.localprovide(a, f) end,
+  dryrun = function(a, f) return actions.dryrun(a[1], f) end,
   elevate = function(a, f) return actions.elevate(f) end,
   remove = function(a, f) return actions.remove(a, f) end,
   list = function() return actions.list() end,
