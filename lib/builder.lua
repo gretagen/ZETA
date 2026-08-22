@@ -224,7 +224,7 @@ local function obtain_payload(p, manifest, local_dir)
   end
   local dest = p:cache_path(url)
   log.step(("fetching %s"):format(url))
-  local got, err = fetch.get(resolved, dest)
+  local got, err = fetch.get(resolved, dest, path.basename(url))
   if not got then error(("download failed: %s"):format(tostring(err)), 0) end
   if manifest.sha256 then
     log.step(("verifying sha256 of %s"):format(path.basename(got)))
@@ -321,7 +321,7 @@ function builder.install(manifest, opts)
     error(("install of %s failed: %s"):format(name, tostring(err)), 0)
   end
 
-  log.ok(("installed %s-%s"):format(name, manifest.version))
+  log.ok(("provided %s-%s"):format(name, manifest.version))
   return true
 end
 

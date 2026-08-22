@@ -138,7 +138,7 @@ function commit.apply(staging, opts)
       if not path.run("ln -s " .. path.quote(e.target) .. " " .. path.quote(dest)) then
         error(("failed to create symlink %q"):format(dest), 0)
       end
-      log.detail(("installed symlink %s -> %s"):format(e.rel, e.target))
+      log.detail(("provided symlink %s -> %s"):format(e.rel, e.target))
     else
       if path.exists(dest) then
         log.detail(("overwriting existing %s"):format(e.rel))
@@ -146,7 +146,7 @@ function commit.apply(staging, opts)
       if not path.run("cp -a " .. path.quote(src) .. " " .. path.quote(dest)) then
         error(("failed to install %q"):format(e.rel), 0)
       end
-      log.detail(("installed %s"):format(e.rel))
+      log.detail(("provided %s"):format(e.rel))
     end
   end
 

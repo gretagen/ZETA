@@ -150,9 +150,8 @@ function actions._install(name, flags, opts)
 		return 0
 	end
 
-	print("")
 	for _, item in ipairs(plan) do
-		print(("  will install %s-%s"):format(item.name, item.manifest.version))
+		print(("  will provide %s-%s"):format(item.name, item.manifest.version))
 	end
 	print("")
 
