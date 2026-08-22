@@ -29,6 +29,7 @@ Commands:
   -Provide <pkg>...       Install packages and their dependencies from the remote repository
   -ReProvide <pkg>...     Reinstall packages even if they are already installed
   -LocalProvide <pkg>...  Install packages from the local /packages tree
+  -DryRun <pkg>           Resolve a remote package and its dependencies without installing
   -Elevate                Update all installed packages to their latest versions
   -Remove <pkg>...        Remove installed packages (see --with-deps)
   -List                   List installed packages and dependencies
@@ -152,9 +153,14 @@ function actions._install(name, flags, opts)
 
 	print("")
 	for _, item in ipairs(plan) do
-		print(("  will install %s-%s"):format(item.name, item.manifest.version))
+		local verb = opts.dry_run and "Would install" or "Will install"
+		print(("  %s %s-%s"):format(verb, item.name, item.manifest.version))
 	end
 	print("")
+
+	if opts.dry_run then
+		return 0
+	end
 
 	if not confirm(("Install %d package(s)?"):format(#plan), flags.pass) then
 		log.info("aborted by user")
@@ -178,6 +184,15 @@ function actions._install(name, flags, opts)
 		end
 	end
 	return 0
+end
+
+function actions.dryrun(name, flags)
+	name = path.sanitize_name(name)
+	if not name then
+		log.error("Ivalid package name")
+		return 1
+	end
+	return actions._install(name, flags, { source = "remote", dry_run = true })
 end
 
 function actions.provide(names, flags)

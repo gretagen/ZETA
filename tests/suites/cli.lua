@@ -17,7 +17,7 @@ local function bad(args)
 end
 
 suite:test("every documented command parses", function()
-  for _, c in ipairs({ "-Provide", "-ReProvide", "-LocalProvide", "-Remove", "-Localize", "-Test" }) do
+  for _, c in ipairs({ "-Provide", "-ReProvide", "-LocalProvide", "-Remove", "-Localize", "-Test", "-DryRun" }) do
     local p = parse({ c, "pkg" })
     lib.assert_eq(p.args[1], "pkg")
   end
@@ -55,12 +55,14 @@ suite:test("missing argument is rejected", function()
   bad({ "-LocalProvide" })
   bad({ "-Localize" })
   bad({ "-Test" })
+  bad({ "-DryRun" })
 end)
 
 suite:test("too many arguments is rejected for single-argument commands", function()
   bad({ "-List", "extra" })
   bad({ "-Localize", "a", "b" })
   bad({ "-Test", "a", "b" })
+  bad({ "-DryRun", "a", "b" })
 end)
 
 suite:test("install and remove commands accept multiple names", function()
