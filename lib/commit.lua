@@ -60,7 +60,11 @@ local function blocked(rel)
   end
   for _, s in ipairs(BLOCKED_SUFFIXES) do
     if rel:sub(-#s) == s then
-      return "init unit file: " .. rel
+      if s == ".service" and rel:match("dbus%-1/services/") then
+        -- D-Bus activation files are not init units; allow them.
+      else
+        return "init unit file: " .. rel
+      end
     end
   end
   return nil
