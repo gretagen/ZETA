@@ -138,8 +138,11 @@ function commit.apply(staging, opts)
       if path.symlink_escapes(e.rel, e.target) then
         error(("symlink %q -> %q escapes the root"):format(e.rel, e.target), 0)
       end
-      os.remove(dest)
-      if not path.run("ln -s " .. path.quote(e.target) .. " " .. path.quote(dest)) then
+      -- Must swap the link atomically: delete-then-create leaves a window
+      -- where a live shared library is absent, and the ln(1) subprocess
+      -- itself fails to start (shell needs that library). ln -sfn replaces
+      -- the link in one step so it is never observed missing.
+      if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(dest)) then
         error(("failed to create symlink %q"):format(dest), 0)
       end
       log.detail(("provided symlink %s -> %s"):format(e.rel, e.target))
@@ -147,7 +150,16 @@ function commit.apply(staging, opts)
       if path.exists(dest) then
         log.detail(("overwriting existing %s"):format(e.rel))
       end
-      if not path.run("cp -a " .. path.quote(src) .. " " .. path.quote(dest)) then
+      -- Copy to a temp name then rename(): overwriting a running executable
+      -- in place fails with ETXTBSY, and a half-copied file is never visible
+      -- to other processes. rename() is atomic on the same filesystem.
+      local tmp = dest .. ".zeta-tmp-" .. tostring(math.random(100000, 999999))
+      if not path.run("cp -a " .. path.quote(src) .. " " .. path.quote(tmp)) then
+        os.remove(tmp)
+        error(("failed to install %q"):format(e.rel), 0)
+      end
+      if not path.run("mv -f " .. path.quote(tmp) .. " " .. path.quote(dest)) then
+        os.remove(tmp)
         error(("failed to install %q"):format(e.rel), 0)
       end
       log.detail(("provided %s"):format(e.rel))
