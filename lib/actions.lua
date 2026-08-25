@@ -69,9 +69,6 @@ Package format (one package.lua per package, returning a table):
 scratch directory and then runs its `test` hook when declared; without a hook
 it passes on payload integrity plus a non-empty staging tree. It is strictly
 offline and never installs anything or touches the package database.
-
-Zeta never reads or writes init-system configuration (systemd, OpenRC,
-sysvinit) and never touches distro-identity files such as /etc/os-release.
 ]]
 
 function actions.help()

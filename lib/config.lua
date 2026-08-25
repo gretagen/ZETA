@@ -1,9 +1,8 @@
 -- config.lua -- all roots and locations, derived exclusively from environment
 -- variables.
 --
--- Zeta must not depend on any specific distribution: it never reads
--- /etc/os-release, /etc/rc.*, or any init-system state. Everything is
--- configured by these environment variables (all optional):
+-- Zeta must not depend on any specific distribution: everything is configured
+-- by these environment variables (all optional):
 --
 --   ZETA_ROOT            filesystem root packages are installed into  (default /)
 --   ZETA_REPO            remote repository base URL                     (default https://github.com/gretagen/zeta-packages;
