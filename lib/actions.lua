@@ -19,6 +19,7 @@ local deps = require("deps")
 local builder = require("builder")
 local manifest = require("manifest")
 local vercmp = require("vercmp")
+local hooks = require("hooks")
 
 local HELP = [[
 Zeta -- Zerene OS package manager
@@ -160,6 +161,7 @@ function actions._install(name, flags, opts)
 		return 0
 	end
 
+	local installed = {}
 	for _, item in ipairs(plan) do
 		if db.is_installed(item.name) and not flags.force then
 			log.warn(("%s already installed, skipping"):format(item.name))
@@ -174,6 +176,15 @@ function actions._install(name, flags, opts)
 				log.error(tostring(ierr))
 				return 1
 			end
+			installed[item.name] = true
+		end
+	end
+
+	-- Post-transaction hooks (deps already present on disk at this point).
+	if next(installed) then
+		local hfail = pcall(hooks.run_installed, installed)
+		if not hfail then
+			log.error("hook runner failed")
 		end
 	end
 	return 0
