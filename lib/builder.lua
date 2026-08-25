@@ -277,7 +277,8 @@ function builder.install(manifest, opts)
     if manifest.archive then
       -- Declarative binary install: extract straight into the staging root.
       log.step(("unpacking archive (strip=%d)"):format(manifest.archive.strip))
-      archive.extract(payload, stage, { strip = manifest.archive.strip })
+      local _, extract_err = archive.extract(payload, stage, { strip = manifest.archive.strip })
+      if not _ then error(tostring(extract_err), 0) end
     elseif manifest.build then
       if payload then
         log.step(("unpacking source %s"):format(path.basename(payload)))
@@ -358,7 +359,8 @@ function builder.test(manifest, opts)
     if manifest.archive then
       -- Declarative binary package: extract straight into the staging root.
       log.step(("unpacking archive (strip=%d)"):format(manifest.archive.strip))
-      archive.extract(payload, stage, { strip = manifest.archive.strip })
+      local _, extract_err = archive.extract(payload, stage, { strip = manifest.archive.strip })
+      if not _ then error(tostring(extract_err), 0) end
     elseif manifest.build then
       if payload then
         log.step(("unpacking source %s"):format(path.basename(payload)))
