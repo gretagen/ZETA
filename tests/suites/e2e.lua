@@ -1,8 +1,8 @@
 -- e2e.lua suite -- drives the real `zeta` binary offline: a generated fixture
 -- repository (file:// urls), a fake ZETA_ROOT, and the local /packages tree.
 -- Covers -Provide, -LocalProvide, -ReProvide, -Remove, -List, -Localize, dep
--- resolution, reverse-dependency protection, checksum failures, and the
--- init/distro-identity blocklist.
+-- resolution, reverse-dependency protection, checksum failures, and
+-- init-system paths.
 
 local lib = require("lib")
 local manifest = require("manifest")
@@ -44,7 +44,7 @@ local app2_tar, app2_sha = make_payload("app2", { ["usr/bin/app2"] = "#!/bin/sh\
 -- app3: shares hello with app (for --with-deps shared-dependency handling)
 local app3_tar, app3_sha = make_payload("app3", { ["usr/bin/app3"] = "#!/bin/sh\necho app3\n" })
 
--- evil: carries an init-system file (must be refused)
+-- evil: carries an init-system file (installs normally; no blocklist)
 local evil_tar, evil_sha = make_payload("evil", { ["etc/init.d/evil"] = "#init\n" })
 
 local function file_url(p)
@@ -396,13 +396,11 @@ suite:test("checksum mismatch aborts the install", function()
   lib.assert_contains(out, "sha256 mismatch")
 end)
 
-suite:test("init-system paths are never installed", function()
+suite:test("init-system paths are installed normally", function()
   local e = fresh_env()
   local code, out = lib.run_zeta({ "-Provide", "evil", "--pass" }, e)
-  lib.assert_eq(code, 1)
-  lib.assert_contains(out, "refusing")
-  lib.assert_contains(out, "init")
-  lib.assert_false(lib.exists(path.join(e.ZETA_ROOT, "etc/init.d")))
+  lib.assert_eq(code, 0, out)
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "etc/init.d/evil")))
 end)
 
 suite:test("-Remove unlinks exactly the owned files", function()

@@ -1,6 +1,6 @@
--- commit.lua suite -- the staging-to-root commit step: init/distro-identity
--- blocklist, pre-flight abort, cross-package file conflicts, symlink safety,
--- and the optional files whitelist.
+-- commit.lua suite -- the staging-to-root commit step: pre-flight validation,
+-- cross-package file conflicts, symlink safety, and the optional files
+-- whitelist.
 
 local lib = require("lib")
 local commit = require("commit")
@@ -56,39 +56,30 @@ suite:test("commits files and symlinks, skipping dirs", function()
   lib.assert_true(found["usr/lib/liba.so.1"])
 end)
 
-suite:test("blocklist: init-system prefix aborts pre-flight", function()
+suite:test("init-system and distro-identity paths are installed normally", function()
   local root = fresh()
   local s = path.join(root, "stage")
   os.execute("mkdir -p " .. path.quote(s .. "/usr/bin"))
   os.execute("mkdir -p " .. path.quote(s .. "/etc/systemd/system"))
+  os.execute("mkdir -p " .. path.quote(s .. "/etc/init.d"))
+  os.execute("mkdir -p " .. path.quote(s .. "/etc/runlevels/default"))
+  lib.write(path.join(s, "etc/systemd/system/x.service"), "unit")
+  lib.write(path.join(s, "etc/init.d/rc"), "#init")
+  lib.write(path.join(s, "etc/os-release"), "ID=zerene")
+  lib.write(path.join(s, "etc/rc.conf"), "rc_parallel=YES")
+  lib.write(path.join(s, "etc/runlevels/default/rc"), "default")
   lib.write(path.join(s, "usr/bin/ok"), "ok")
-  lib.write(path.join(s, "etc/systemd/system/x.service"), "init")
-  local ok, err = pcall(commit.apply, s, { pkg_name = "evil" })
-  lib.assert_false(ok)
-  lib.assert_contains(err, "refusing")
-  lib.assert_contains(err, "init")
-  -- pre-flight means NOTHING was copied, not even the innocent file
-  lib.assert_false(lib.exists(path.join(root, "usr/bin/ok")))
-end)
-
-suite:test("blocklist: distro-identity files are refused", function()
-  local root = fresh()
-  local s = path.join(root, "stage")
-  os.execute("mkdir -p " .. path.quote(s .. "/etc"))
-  lib.write(path.join(s, "etc/os-release"), "ID=notyours")
-  local ok, err = pcall(commit.apply, s, { pkg_name = "evil" })
-  lib.assert_false(ok)
-  lib.assert_contains(err, "os-release")
-end)
-
-suite:test("blocklist: init unit suffixes are refused anywhere", function()
-  local root = fresh()
-  local s = path.join(root, "stage")
-  os.execute("mkdir -p " .. path.quote(s .. "/usr/bin"))
-  lib.write(path.join(s, "usr/bin/foo.service"), "unit")
-  local ok, err = pcall(commit.apply, s, { pkg_name = "evil" })
-  lib.assert_false(ok)
-  lib.assert_contains(err, "unit file")
+  local owned = commit.apply(s, { pkg_name = "openrc" })
+  lib.assert_true(lib.exists(path.join(root, "etc/systemd/system/x.service")))
+  lib.assert_true(lib.exists(path.join(root, "etc/init.d/rc")))
+  lib.assert_true(lib.exists(path.join(root, "etc/runlevels/default/rc")))
+  lib.assert_true(lib.exists(path.join(root, "etc/os-release")))
+  lib.assert_true(lib.exists(path.join(root, "etc/rc.conf")))
+  lib.assert_true(lib.exists(path.join(root, "usr/bin/ok")))
+  local found = {}
+  for _, e in ipairs(owned) do found[e.rel] = true end
+  lib.assert_true(found["etc/init.d/rc"])
+  lib.assert_true(found["etc/rc.conf"])
 end)
 
 suite:test("cross-package file conflict aborts unless forced", function()

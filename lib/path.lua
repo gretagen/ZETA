@@ -1,9 +1,7 @@
 -- path.lua -- filesystem path helpers shared by every Zeta module.
 --
--- Zeta is intentionally distro- and init-agnostic, so everything here is
--- plain POSIX: string manipulation plus `mkdir -p`, `cp -a`, etc. We never
--- read or write init-system state, /etc/os-release, or any distro-specific
--- configuration. All paths are derived from environment variables (see
+-- Everything here is plain POSIX: string manipulation plus `mkdir -p`,
+-- `cp -a`, etc. All paths are derived from environment variables (see
 -- config.lua) and validated before use.
 
 local path = {}

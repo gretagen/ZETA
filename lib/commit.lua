@@ -1,15 +1,10 @@
 -- commit.lua -- merge a staged install root into the filesystem.
 --
--- Zeta's hard design constraint is enforced here: NO package may ever place
--- a file in an init-system path (systemd, OpenRC, sysvinit, runit, ...) or
--- claim distro identity (/etc/os-release etc.). Those paths are reserved for
--- the distribution itself. Combined with the manifest sandbox and the p API
--- in builder.lua, this is what keeps Zeta init- and distro-agnostic.
---
 -- The staged tree is walked (via `find -printf`, available on all mainstream
--- find implementations), every file is scanned against the blocklist BEFORE
--- anything is copied, cross-package file conflicts abort the install, and
--- only then are files copied into ZETA_ROOT.
+-- find implementations), every entry is validated (symlink safety, path
+-- hygiene) BEFORE anything is copied, and only then are files copied into
+-- ZETA_ROOT. Zeta installs whatever a package ships; init-system and
+-- distro-identity paths are not special-cased.
 
 local commit = {}
 
@@ -17,58 +12,6 @@ local path = require("path")
 local db = require("db")
 local config = require("config")
 local log = require("log")
-
--- Files under these prefixes would wire a package into a specific init system.
-local BLOCKED_PREFIXES = {
-  "etc/systemd",
-  "usr/lib/systemd",
-  "lib/systemd",
-  "etc/init.d",
-  "etc/rc.d",
-  "etc/init",
-  "lib/rc",
-  "usr/lib/rc",
-  "etc/runlevels",
-}
-
--- Files that would claim or override distribution identity / boot policy.
-local BLOCKED_EXACT = {
-  "etc/rc.conf",
-  "etc/rc.local",
-  "etc/rc.shutdown",
-  "etc/inittab",
-  "etc/os-release",
-  "etc/lsb-release",
-}
-
--- systemd unit file extensions: hooking these would assume systemd.
-local BLOCKED_SUFFIXES = {
-  ".service", ".timer", ".socket", ".path", ".mount",
-  ".target", ".unit", ".automount", ".device", ".slice", ".scope",
-}
-
-local function blocked(rel)
-  for _, p in ipairs(BLOCKED_PREFIXES) do
-    if rel == p or rel:sub(1, #p + 1) == p .. "/" then
-      return "reserved init-system path: " .. rel
-    end
-  end
-  for _, e in ipairs(BLOCKED_EXACT) do
-    if rel == e then
-      return "reserved distro-identity path: " .. rel
-    end
-  end
-  for _, s in ipairs(BLOCKED_SUFFIXES) do
-    if rel:sub(-#s) == s then
-      if s == ".service" and rel:match("dbus%-1/services/") then
-        -- D-Bus activation files are not init units; allow them.
-      else
-        return "init unit file: " .. rel
-      end
-    end
-  end
-  return nil
-end
 
 -- Walk a staged tree: returns entries { { rel, type, target } } where type is
 -- "file", "dir" or "symlink". Uses find -printf ('%y|%l|%P') which gives
@@ -114,17 +57,9 @@ function commit.apply(staging, opts)
 
   local root = config.get().root
 
-  -- Pre-flight: enforcement scan BEFORE copying anything,
-  -- so a bad package leaves the filesystem untouched.
-  -- File conflict checks are skipped: multiple packages may own the same file.
   local owned = {}
   for _, e in ipairs(entries) do
     if e.type ~= "dir" then
-      local why = blocked(e.rel)
-      if why then
-        error(("refusing to install %q from %s: %s (Zeta is init- and distro-agnostic; init hooks and distro-identity files are never installed)"):format(
-          e.rel, opts.pkg_name or "package", why), 0)
-      end
       owned[#owned + 1] = e
     end
   end
