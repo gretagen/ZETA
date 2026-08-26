@@ -119,6 +119,17 @@ function path.mkdir_p(dir)
   return path.run("mkdir -p " .. path.quote(dir))
 end
 
+-- readlink wrapper: returns the symlink target, or nil when `p` is not a
+-- symlink (readlink(1) prints nothing and exits non-zero otherwise).
+function path.readlink(p)
+  local f = io.popen("readlink " .. path.quote(p) .. " 2>/dev/null")
+  if not f then return nil end
+  local target = f:read("*l")
+  f:close()
+  if target == nil or target == "" then return nil end
+  return target
+end
+
 -- True if a file or directory exists (never follows a dangling symlink as a
 -- hit, which matters for package-tree discovery).
 function path.exists(p)
