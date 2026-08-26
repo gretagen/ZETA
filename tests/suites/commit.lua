@@ -39,21 +39,21 @@ local function root_of()
   return require("config").get().root
 end
 
-suite:test("commits files and symlinks, skipping dirs", function()
+suite:test("commits files, symlinks, and dirs", function()
   local root = fresh()
   local s = simple_stage(root, "a")
   local owned = commit.apply(s, { pkg_name = "A" })
   lib.assert_true(lib.exists(path.join(root, "usr/bin/tool")))
   lib.assert_true(lib.exists(path.join(root, "usr/lib/liba.so")))
   lib.assert_true(lib.is_symlink(path.join(root, "usr/lib/liba.so.1")))
-  -- owned must contain only real paths (files + symlinks), never dirs
-  for _, e in ipairs(owned) do
-    lib.assert_true(e.type ~= "dir", "directories must not be recorded as owned")
-  end
+  lib.assert_true(path.exists(path.join(root, "usr/bin")))
+  lib.assert_true(path.exists(path.join(root, "usr/lib")))
   local found = {}
   for _, e in ipairs(owned) do found[e.rel] = true end
   lib.assert_true(found["usr/bin/tool"])
   lib.assert_true(found["usr/lib/liba.so.1"])
+  lib.assert_true(found["usr/bin"], "directories must be recorded as owned")
+  lib.assert_true(found["usr/lib"], "directories must be recorded as owned")
 end)
 
 suite:test("init-system and distro-identity paths are installed normally", function()
