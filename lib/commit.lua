@@ -61,17 +61,43 @@ function commit.apply(staging, opts)
   -- recorded so removal can prune them once empty.
   local owned = entries
 
+  -- Commit non-symlinks before symlinks: a library symlink (libfoo.so.1 ->
+  -- libfoo.so.1.2.3) must never point at a file that has not been installed
+  -- yet. During an upgrade the target filename may be new, so flipping the
+  -- link first leaves a window where every binary that loads the library
+  -- fails to exec (e.g. bash dies when libncursesw.so.6 dangles). Stable,
+  -- so the walk order is preserved within each group.
+  local non_sym, sym = {}, {}
+  for _, e in ipairs(owned) do
+    if e.type == "symlink" then sym[#sym + 1] = e else non_sym[#non_sym + 1] = e end
+  end
+  owned = non_sym
+  for _, e in ipairs(sym) do owned[#owned + 1] = e end
+
+  -- When the target path is a symlink (e.g. /sbin -> usr/sbin from the
+  -- filesystem package), create the real directory the link points at
+  -- instead: mkdir -p refuses to follow a dangling symlink. Targets are
+  -- relative by construction (symlink_escapes rejects absolute ones), so
+  -- resolving against the parent is safe.
+  local function ensure_dir(d)
+    local target = path.readlink(d)
+    if target then
+      d = path.join(path.dirname(d), target)
+    end
+    if not path.mkdir_p(d) then
+      error(("failed to create directory %q"):format(d), 0)
+    end
+  end
+
   -- Copy phase.
   for _, e in ipairs(owned) do
     local dest = path.join(root, e.rel)
     local src = path.join(staging, e.rel)
     if e.type == "dir" then
-      if not path.mkdir_p(dest) then
-        error(("failed to create directory %q"):format(dest), 0)
-      end
+      ensure_dir(dest)
       log.detail(("provided directory %s"):format(e.rel))
     else
-      path.mkdir_p(path.dirname(dest))
+      ensure_dir(path.dirname(dest))
       if e.type == "symlink" then
         if path.symlink_escapes(e.rel, e.target) then
           error(("symlink %q -> %q escapes the root"):format(e.rel, e.target), 0)
