@@ -109,6 +109,43 @@ suite:test("a package may overwrite its own previously installed files", functio
   lib.assert_eq(lib.read(path.join(root, "usr/bin/tool")), "v2")
 end)
 
+suite:test("files behind a dangling usr-merge symlink commit", function()
+  local root = fresh()
+  -- filesystem package: usr-merge symlink, /usr/sbin does not exist yet
+  os.execute("mkdir -p " .. path.quote(root .. "/usr"))
+  os.execute("ln -s usr/sbin " .. path.quote(root .. "/sbin"))
+
+  local s = path.join(root, "stage")
+  os.execute("mkdir -p " .. path.quote(s .. "/sbin"))
+  lib.write(path.join(s, "sbin/ldconfig"), "ldconfig")
+
+  local owned = commit.apply(s, { pkg_name = "glibc" })
+  lib.assert_true(lib.exists(path.join(root, "usr/sbin/ldconfig")))
+  lib.assert_true(lib.exists(path.join(root, "sbin/ldconfig")))
+  local found = {}
+  for _, e in ipairs(owned) do found[e.rel] = true end
+  lib.assert_true(found["sbin/ldconfig"])
+end)
+
+suite:test("library symlinks commit after their target files", function()
+  local root = fresh()
+  local s = path.join(root, "stage")
+  os.execute("mkdir -p " .. path.quote(s .. "/usr/lib"))
+  lib.write(path.join(s, "usr/lib/libfoo.so.1.2.3"), "ELF-stub")
+  os.execute("ln -s libfoo.so.1.2.3 " .. path.quote(s .. "/usr/lib/libfoo.so.1"))
+
+  local owned = commit.apply(s, { pkg_name = "foo" })
+  lib.assert_true(lib.exists(path.join(root, "usr/lib/libfoo.so.1.2.3")))
+  lib.assert_true(lib.is_symlink(path.join(root, "usr/lib/libfoo.so.1")))
+  local file_idx, link_idx
+  for i, e in ipairs(owned) do
+    if e.rel == "usr/lib/libfoo.so.1.2.3" then file_idx = i end
+    if e.rel == "usr/lib/libfoo.so.1" then link_idx = i end
+  end
+  lib.assert_true(file_idx and link_idx, "both entries recorded")
+  lib.assert_true(file_idx < link_idx, "symlink must commit after its target file")
+end)
+
 suite:test("escaping symlink in staging is refused", function()
   local root = fresh()
   local s = path.join(root, "stage")
