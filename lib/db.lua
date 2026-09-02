@@ -332,4 +332,30 @@ function db.remove(name)
   path.run("rm -rf " .. path.quote(db.pkg_dir(name)))
 end
 
+-- Check if `rel` is tracked by any package (optionally excluding `exclude`).
+-- Used by commit.lua to prevent overwriting untracked files.
+function db.is_file_owned(rel, exclude)
+  ensure_migrated()
+  for _, n in ipairs(db.list()) do
+    if n ~= exclude then
+      for _, f in ipairs(db.files(n)) do
+        if f == rel then return true end
+      end
+    end
+  end
+  return false
+end
+
+-- Return the name of the package that owns `rel`, or nil if untracked.
+-- Used by hooks to validate that a hook's trigger targets its owning package.
+function db.file_owner(rel)
+  ensure_migrated()
+  for _, n in ipairs(db.list()) do
+    for _, f in ipairs(db.files(n)) do
+      if f == rel then return n end
+    end
+  end
+  return nil
+end
+
 return db

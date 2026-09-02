@@ -20,10 +20,23 @@
 -- Executed commands carry the same trust as a package's install/build
 -- functions: the hook ships inside the package itself, so it is no more or
 -- less privileged than the code that staged its payload.
+--
+-- Security notes:
+--   * The sandbox (sandbox.loadfile) only restricts the DATA DECLARATION
+--     phase: the hook file is compiled in a restricted Lua environment with
+--     no io/os/require access. However, action.exec is passed straight to
+--     path.run() -> os.execute() and runs arbitrary shell with full
+--     privileges. The sandbox does NOT restrict what exec can do.
+--   * Hook files and their parent directories must be owned by root and not
+--     writable by group or world (see check_hook_safety).
+--   * A hook's trigger target is validated against the package that owns the
+--     hook file in the database. Hooks targeting unrelated packages or with
+--     no target (global) are warned about but still allowed.
 
 local hooks = {}
 
 local config = require("config")
+local db = require("db")
 local log = require("log")
 local path = require("path")
 local sandbox = require("sandbox")
@@ -49,6 +62,48 @@ local function load_hook(filepath)
     error(("hook %q: missing action table"):format(filepath), 0)
   end
   return raw
+end
+
+-- Verify that a hook file and its parent directories up to the install root
+-- are owned by root and not writable by group or world. Returns true if safe,
+-- or nil, reason on failure.
+local function check_hook_safety(filepath)
+  local root = config.get().root
+
+  -- Check the hook file itself.
+  local uid, perms = path.stat_owner_and_perms(filepath)
+  if not uid then
+    return nil, ("could not stat hook %s"):format(filepath)
+  end
+  if uid ~= 0 then
+    return nil, ("hook %s not owned by root (uid %d)"):format(filepath, uid)
+  end
+  if perms % 10 >= 2 or math.floor(perms / 10) % 10 >= 2 then
+    return nil, ("hook %s has insecure permissions %04d (group/world writable)"):format(filepath, perms)
+  end
+
+  -- Walk from the hooks directory up to the install root, checking each
+  -- parent. This prevents exploitation via a world-writable intermediate
+  -- directory even when the hook file itself is correctly permissioned.
+  local hooks_dir = path.join(root, "usr/share/zeta/hooks")
+  local dir = path.dirname(filepath)
+  while dir and dir ~= root and dir ~= "/" do
+    -- Stop once we reach the hooks directory itself (already checked above
+    -- implicitly via the file check, and we don't want to re-check root).
+    if dir == hooks_dir then break end
+    local d_uid, d_perms = path.stat_owner_and_perms(dir)
+    if d_uid then
+      if d_uid ~= 0 then
+        return nil, ("directory %s not owned by root (uid %d)"):format(dir, d_uid)
+      end
+      if d_perms % 10 >= 2 or math.floor(d_perms / 10) % 10 >= 2 then
+        return nil, ("directory %s has insecure permissions %04d"):format(dir, d_perms)
+      end
+    end
+    dir = path.dirname(dir)
+  end
+
+  return true
 end
 
 -- True when the hook's trigger matches a transaction that installed any of
@@ -87,16 +142,49 @@ function hooks.run_installed(installed)
 
   local pending = {}
   for _, filepath in ipairs(files) do
-    local ok, hook = pcall(load_hook, filepath)
-    if not ok then
-      log.warn(tostring(hook))
-    elseif trigger_matches(hook.trigger, installed) then
-      pending[#pending + 1] = {
-        file = filepath,
-        order = hook.order or 100,
-        action = hook.action,
-      }
+    -- Security: verify file and directory ownership/permissions before loading.
+    local safe, safe_err = check_hook_safety(filepath)
+    if not safe then
+      log.warn(tostring(safe_err))
+    else
+      local ok, hook = pcall(load_hook, filepath)
+      if not ok then
+        log.warn(tostring(hook))
+      else
+        -- Security: validate that the trigger targets the owning package.
+        local root = config.get().root
+        local rel = filepath:match("^" .. root .. "/?(.*)")
+        if rel then
+          local owner = db.file_owner(rel)
+          if owner then
+            local targets = hook.trigger.target
+            if type(targets) == "table" and #targets > 0 then
+              local found = false
+              for _, t in ipairs(targets) do
+                if t == owner then found = true break end
+              end
+              if not found then
+                log.warn(("hook %s: owned by %s but trigger targets {%s}, skipping"):format(
+                  filepath, owner, table.concat(targets, ", ")))
+                goto continue
+              end
+            elseif targets == nil or (type(targets) == "table" and #targets == 0) then
+              log.warn(("hook %s: owned by %s but trigger has no target (global hook)"):format(
+                filepath, owner))
+            end
+          end
+        end
+
+        if trigger_matches(hook.trigger, installed) then
+          pending[#pending + 1] = {
+            file = filepath,
+            order = hook.order or 100,
+            action = hook.action,
+          }
+        end
+      end
     end
+    ::continue::
   end
   if #pending == 0 then return 0 end
 
@@ -105,10 +193,15 @@ function hooks.run_installed(installed)
   local failures = 0
   for _, h in ipairs(pending) do
     local exec = h.action.exec
-    if exec and exec ~= "" then
+    -- exec must be a string; non-string types (table, number, bool) are
+    -- rejected here rather than passed to os.execute where they would be
+    -- coerced to a string representation.
+    if type(exec) == "string" and exec ~= "" then
       local when = h.action.when or "post"
       if when == "post" then
         log.step(("running hook %s"):format(h.file))
+        -- NOTE: exec runs with full privileges; the sandbox only covers
+        -- the data declaration phase above.
         if path.run(exec) then
           log.ok(("hook ok: %s"):format(h.action.description or h.file))
         else

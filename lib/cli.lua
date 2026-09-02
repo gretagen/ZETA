@@ -17,6 +17,7 @@ local COMMANDS = {
   list = true,
   localize = true,
   test = true,
+  adopt = true,
   help = true,
 }
 
@@ -24,6 +25,7 @@ local COMMANDS = {
 local ARITY = {
   localize = 1,
   test = 1,
+  adopt = 1,
   list = 0,
   elevate = 0,
   help = 0,
@@ -35,9 +37,10 @@ local MIN_ARGS = {
   reprovide = 1,
   localprovide = 1,
   remove = 1,
+  adopt = 1,
 }
 
--- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps } }.
+-- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps, dir, files_path, version } }.
 -- Returns nil, errmsg on any parse problem.
 function cli.parse(args)
   local cmd
@@ -46,15 +49,21 @@ function cli.parse(args)
 
   for _, a in ipairs(args) do
     if a:match("^%-%-") then
-      local f = a:sub(3)
-      if f == "pass" then
+      local key, val = a:match("^%-%-([^=]+)=?(.*)")
+      if key == "pass" then
         flags.pass = true
-      elseif f == "force" then
+      elseif key == "force" then
         flags.force = true
-      elseif f == "with-deps" then
+      elseif key == "with-deps" then
         flags.with_deps = true
-      elseif f == "help" then
+      elseif key == "help" then
         cmd = "help"
+      elseif key == "dir" then
+        flags.dir = val ~= "" and val or nil
+      elseif key == "files" then
+        flags.files_path = val ~= "" and val or nil
+      elseif key == "version" then
+        flags.version = val ~= "" and val or nil
       else
         return nil, "unknown flag: " .. a
       end

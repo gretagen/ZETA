@@ -89,6 +89,20 @@ function commit.apply(staging, opts)
     end
   end
 
+  -- Safety: block overwriting untracked files unless --force.
+  -- This prevents the "zerene_older disaster" where zeta silently overwrites
+  -- critical system libraries that weren't tracked in the database.
+  if not opts.force then
+    for _, e in ipairs(owned) do
+      if e.type ~= "dir" and path.exists(path.join(root, e.rel)) then
+        if not db.is_file_owned(e.rel, opts.pkg_name) then
+          error(("refusing to overwrite untracked file %s "
+            .. "(use -Adopt to register it, or --force to overwrite)"):format(e.rel), 0)
+        end
+      end
+    end
+  end
+
   -- Copy phase.
   for _, e in ipairs(owned) do
     local dest = path.join(root, e.rel)

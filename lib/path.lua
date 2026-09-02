@@ -142,4 +142,18 @@ function path.exists(p)
   return r
 end
 
+-- Return the numeric uid and octal permission mode of a file, or nil on
+-- failure. Used by hooks to verify that hook files and their parent
+-- directories are owned by root and not writable by group or world.
+function path.stat_owner_and_perms(filepath)
+  local f = io.popen("stat -c '%u %a' " .. path.quote(filepath) .. " 2>/dev/null")
+  if not f then return nil end
+  local line = f:read("*l")
+  f:close()
+  if not line then return nil end
+  local uid, perms = line:match("^(%d+)%s+(%d+)$")
+  if not uid then return nil end
+  return tonumber(uid), tonumber(perms)
+end
+
 return path

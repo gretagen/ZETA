@@ -35,6 +35,7 @@ Commands:
   -List                   List installed packages and dependencies
   -Localize <query>       Search the remote repository index for <query>
   -Test <pkg>             Verify <pkg> offline WITHOUT installing it
+  -Adopt <pkg>            Register existing files into the package database
   -Help                   Show this help
 
 Flags:
@@ -532,6 +533,28 @@ function actions.elevate(flags)
 		})
 		if not iok then
 			log.error(tostring(ierr))
+			return 1
+		end
+	end
+	return 0
+end
+
+function actions.adopt(names, flags)
+	local adopt = require("adopt")
+	for _, raw in ipairs(names) do
+		local name = path.sanitize_name(raw)
+		if not name then
+			log.error("invalid package name: " .. tostring(raw))
+			return 1
+		end
+		local ok, err = pcall(adopt.register, name, {
+			version = flags.version,
+			dir = flags.dir,
+			files_path = flags.files_path,
+			force = flags.force,
+		})
+		if not ok then
+			log.error(tostring(err))
 			return 1
 		end
 	end
