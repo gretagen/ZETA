@@ -237,10 +237,51 @@ local function obtain_payload(p, manifest, local_dir)
   return got
 end
 
--- install(manifest, opts) -- opts: { force, source, local_dir, kind }
+-- Resolve a manifest's payload URL and check the cache. Returns:
+--   { url = resolved_url, dest = cache_path } if download is needed
+--   { cached = path } if already in cache
+--   nil if manifest has no url
+-- Used by the parallel fetch phase to prepare downloads before building.
+function builder.fetch_payload(manifest, opts)
+  opts = opts or {}
+  if not manifest.url then return nil end
+  local url = manifest.url
+  local resolved = url
+  if not url:match("^%w+://") and not url:match("^/") then
+    if not opts.local_dir then
+      return nil, ("manifest %q url %q has no scheme and no local package directory"):format(
+        manifest.name, url)
+    end
+    resolved = path.join(opts.local_dir, url)
+  end
+  -- Build a cache path using the same logic as make_p:cache_path
+  local ext = url:match("%.([%w]+)$") or "bin"
+  local dest = path.join(config.get().cache_dir,
+    manifest.name .. "-" .. manifest.version .. "." .. ext)
+  if path.exists(dest) then
+    return { cached = dest }
+  end
+  return { url = resolved, dest = dest }
+end
+
+-- Verify sha256 for a downloaded payload. Throws on mismatch.
+function builder.verify_payload(manifest, payload)
+  if manifest.sha256 and payload then
+    log.step(("verifying sha256 of %s"):format(path.basename(payload)))
+    local vok, verr = checksum.verify(payload, manifest.sha256)
+    if not vok then error(tostring(verr), 0) end
+    log.ok("sha256 verified")
+  elseif manifest.url and manifest.url:match("^https?://") then
+    log.warn(("no sha256 in manifest for %s; checksum not verified"):format(manifest.name))
+  end
+end
+
+-- install(manifest, opts) -- opts: { force, source, local_dir, kind, pre_fetched }
 -- opts.kind is "package" for an explicit install or "dependency" for an
 -- auto-installed dependency (see actions.lua); it decides which database
 -- registry the entry lands in.
+-- opts.pre_fetched is an optional path to an already-downloaded payload;
+-- when set, obtain_payload is skipped and the given path is used directly.
 function builder.install(manifest, opts)
   opts = opts or {}
   local cfg = config.get()
@@ -272,7 +313,13 @@ function builder.install(manifest, opts)
   local p = make_p(manifest, { work = work, stage = stage, local_dir = opts.local_dir })
 
   local ok, err = pcall(function()
-    local payload = obtain_payload(p, manifest, opts.local_dir)
+    local payload
+    if opts.pre_fetched then
+      payload = opts.pre_fetched
+      builder.verify_payload(manifest, payload)
+    else
+      payload = obtain_payload(p, manifest, opts.local_dir)
+    end
 
     if manifest.archive then
       -- Declarative binary install: extract straight into the staging root.

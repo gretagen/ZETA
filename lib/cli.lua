@@ -17,7 +17,6 @@ local COMMANDS = {
   list = true,
   localize = true,
   test = true,
-  adopt = true,
   help = true,
 }
 
@@ -25,7 +24,6 @@ local COMMANDS = {
 local ARITY = {
   localize = 1,
   test = 1,
-  adopt = 1,
   list = 0,
   elevate = 0,
   help = 0,
@@ -37,7 +35,6 @@ local MIN_ARGS = {
   reprovide = 1,
   localprovide = 1,
   remove = 1,
-  adopt = 1,
 }
 
 -- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps, dir, files_path, version } }.

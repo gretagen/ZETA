@@ -316,4 +316,169 @@ function fetch.read(url, label)
   return content, nil
 end
 
+-- Download multiple files in parallel. `items` is a list of
+--   { url = string, dest = string, label = string (optional) }
+-- Returns a list of results in the same order:
+--   { dest = string } on success, or { err = string } on failure.
+-- Local/file:// URLs are copied directly (not parallelized).
+-- Shows a progress counter: "downloading N packages... [done/total] /"
+function fetch.get_parallel(items)
+  local dl = fetch.downloader()
+  if not dl then
+    local results = {}
+    for i = 1, #items do
+      results[i] = { err = "no downloader found (install curl or wget)" }
+    end
+    return results
+  end
+
+  local remote = {}
+  local results = {}
+  local tmp_suffix = "-parallel-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999))
+
+  for i, item in ipairs(items) do
+    local url = fetch.raw_github(item.url)
+    local dest = item.dest
+    path.mkdir_p(path.dirname(dest))
+
+    if not url:match("^https?://") then
+      local src = url:gsub("^file://", "")
+      local ok, err = fetch.copy(src, dest)
+      results[i] = ok and { dest = dest } or { err = err }
+    else
+      local tmp = dest .. tmp_suffix
+      remote[#remote + 1] = { url = url, dest = dest, tmp = tmp, idx = i, label = item.label }
+      results[i] = { pending = true }
+    end
+  end
+
+  if #remote == 0 then
+    return results
+  end
+
+  local progress_file = "/tmp/zeta-progress-" .. tmp_suffix
+  local rc_file = "/tmp/zeta-rc-" .. tmp_suffix
+
+  local script_lines = {
+    "#!/bin/sh",
+    "fail=0",
+    "progress=" .. path.quote(progress_file),
+    "> \"$progress\"",
+  }
+  for _, r in ipairs(remote) do
+    local dl_cmd
+    if dl == "curl" then
+      dl_cmd = "curl -L --fail --show-error -sS -o " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
+    else
+      dl_cmd = "wget -q -O " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
+    end
+    script_lines[#script_lines + 1] = dl_cmd .. " && echo " .. r.idx .. " >> \"$progress\" || true &"
+    script_lines[#script_lines + 1] = "PID_" .. r.idx .. "=$!"
+  end
+  for _, r in ipairs(remote) do
+    script_lines[#script_lines + 1] = "wait $PID_" .. r.idx .. " || fail=1"
+  end
+  script_lines[#script_lines + 1] = "echo $fail > " .. path.quote(rc_file)
+  script_lines[#script_lines + 1] = "exit $fail"
+
+  local script_path = path.join("/tmp", "zeta-parallel" .. tmp_suffix .. ".sh")
+  local sf = io.open(script_path, "w")
+  if not sf then
+    for _, r in ipairs(remote) do
+      results[r.idx] = { err = "cannot create parallel download script" }
+    end
+    return results
+  end
+  sf:write(table.concat(script_lines, "\n") .. "\n")
+  sf:close()
+  os.execute("chmod +x " .. path.quote(script_path))
+
+  -- Launch script in background
+  local pid_file = "/tmp/zeta-pid-" .. tmp_suffix
+  os.execute(path.quote(script_path) .. " & echo $! > " .. path.quote(pid_file))
+
+  -- Read the PID
+  local pid = nil
+  local pf = io.open(pid_file, "r")
+  if pf then
+    pid = pf:read("*l")
+    pf:close()
+  end
+  os.remove(pid_file)
+
+  -- Progress display
+  local spin_frames = { "/", "-", "\\", "|" }
+  local spin_idx = 0
+  local completed = 0
+  local total = #remote
+  local use_spinner = spinner.enabled()
+
+  while pid and path.run("kill -0 " .. pid .. " 2>/dev/null") do
+    -- Count completed downloads from progress file
+    local f = io.open(progress_file, "r")
+    if f then
+      local count = 0
+      for _ in f:lines() do count = count + 1 end
+      f:close()
+      if count > completed then
+        completed = count
+      end
+    end
+    spin_idx = (spin_idx % #spin_frames) + 1
+    local spin_char = spin_frames[spin_idx]
+    if use_spinner then
+      io.write(("\r\27[K  downloading %d packages... [%d/%d] %s"):format(total, completed, total, spin_char))
+      io.flush()
+    end
+    os.execute("sleep 0.1")
+  end
+
+  -- Final count
+  local f = io.open(progress_file, "r")
+  if f then
+    local count = 0
+    for _ in f:lines() do count = count + 1 end
+    f:close()
+    completed = count
+  end
+
+  if use_spinner then
+    io.write(("\r\27[K  downloading %d packages... [%d/%d]\n"):format(total, completed, total))
+    io.flush()
+  else
+    log.step(("downloading %d packages... [%d/%d]"):format(total, completed, total))
+  end
+
+  -- Read exit code
+  local ok = true
+  local rf = io.open(rc_file, "r")
+  if rf then
+    local rc = tonumber(rf:read("*a")) or 1
+    rf:close()
+    ok = (rc == 0)
+  end
+
+  -- Cleanup
+  os.remove(script_path)
+  os.remove(progress_file)
+  os.remove(rc_file)
+
+  for _, r in ipairs(remote) do
+    if not ok then
+      os.remove(r.tmp)
+      results[r.idx] = { err = ("download failed: %s"):format(r.url) }
+    else
+      local renamed, ren_err = os.rename(r.tmp, r.dest)
+      if renamed then
+        results[r.idx] = { dest = r.dest }
+      else
+        os.remove(r.tmp)
+        results[r.idx] = { err = ren_err }
+      end
+    end
+  end
+
+  return results
+end
+
 return fetch
