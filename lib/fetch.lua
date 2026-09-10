@@ -318,11 +318,14 @@ end
 
 -- Download multiple files in parallel. `items` is a list of
 --   { url = string, dest = string, label = string (optional) }
+-- Optional `opts`: { label = string } overrides the default progress label.
 -- Returns a list of results in the same order:
 --   { dest = string } on success, or { err = string } on failure.
 -- Local/file:// URLs are copied directly (not parallelized).
--- Shows a progress counter: "downloading N packages... [done/total] /"
-function fetch.get_parallel(items)
+-- Shows a progress counter: "<label>... [done/total] /"
+function fetch.get_parallel(items, opts)
+  opts = opts or {}
+  local progress_label = opts.label or ("downloading %d packages")
   local dl = fetch.downloader()
   if not dl then
     local results = {}
@@ -427,7 +430,7 @@ function fetch.get_parallel(items)
     spin_idx = (spin_idx % #spin_frames) + 1
     local spin_char = spin_frames[spin_idx]
     if use_spinner then
-      io.write(("\r\27[K  downloading %d packages... [%d/%d] %s"):format(total, completed, total, spin_char))
+      io.write(("\r\27[K  " .. progress_label .. "... [%d/%d] %s"):format(total, completed, total, spin_char))
       io.flush()
     end
     os.execute("sleep 0.1")
@@ -443,10 +446,10 @@ function fetch.get_parallel(items)
   end
 
   if use_spinner then
-    io.write(("\r\27[K  downloading %d packages... [%d/%d]\n"):format(total, completed, total))
+    io.write(("\r\27[K  " .. progress_label .. "... [%d/%d]\n"):format(total, completed, total))
     io.flush()
   else
-    log.step(("downloading %d packages... [%d/%d]"):format(total, completed, total))
+    log.step((progress_label .. "... [%d/%d]"):format(total, completed, total))
   end
 
   -- Read exit code

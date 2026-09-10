@@ -161,7 +161,7 @@ function actions._install(name, flags, opts)
 				}
 			end
 
-			local results = fetch.get_parallel(items)
+	local results = fetch.get_parallel(items)
 			for i, result in ipairs(results) do
 				local n = batch[i]
 				if result.dest then
@@ -592,21 +592,63 @@ function actions.elevate(flags)
 		return 0
 	end
 
-	local upgrades = {}
+	local cfg = config.get()
+
+	-- Phase 1: Fetch all manifests in parallel to check for upgrades.
+	local items = {}
+	local installed_info = {}
 	for _, name in ipairs(installed) do
 		local cur = db.get(name)
 		if cur then
-			local ok, remote = pcall(repo.fetch_manifest, name)
-			if ok and remote then
-				local cmp = vercmp.compare(cur.version, remote.version)
-				if cmp < 0 then
-					upgrades[#upgrades + 1] = {
-						name = name,
-						from = cur.version,
-						to = remote.version,
-						manifest = remote,
-					}
+			installed_info[name] = cur
+			items[#items + 1] = {
+				url = repo.manifest_url(name),
+				dest = path.join(cfg.tmp_dir, "elevate-" .. name .. "-" .. tostring(math.random(10000, 99999)) .. ".lua"),
+				_name = name,
+			}
+		end
+	end
+
+	if #items == 0 then
+		log.info("no packages installed")
+		return 0
+	end
+
+	local results = fetch.get_parallel(items, { label = "checking for packages to elevate" })
+	local manifest_cache = {}
+	for i, result in ipairs(results) do
+		local name = items[i]._name
+		if result.dest then
+			local f = io.open(result.dest, "rb")
+			if f then
+				local src = f:read("*a")
+				f:close()
+				os.remove(result.dest)
+				local m, merr = manifest.load_string(src, repo.manifest_url(name))
+				if m then
+					local ok, cerr = manifest.check_name(m, name)
+					if ok then
+						manifest_cache[name] = m
+					end
 				end
+			end
+		end
+	end
+
+	-- Compare versions to find upgrades.
+	local upgrades = {}
+	for _, name in ipairs(installed) do
+		local cur = installed_info[name]
+		local remote = manifest_cache[name]
+		if cur and remote then
+			local cmp = vercmp.compare(cur.version, remote.version)
+			if cmp < 0 then
+				upgrades[#upgrades + 1] = {
+					name = name,
+					from = cur.version,
+					to = remote.version,
+					manifest = remote,
+				}
 			end
 		end
 	end
@@ -627,11 +669,47 @@ function actions.elevate(flags)
 		return 0
 	end
 
+	-- Phase 2: Pre-fetch all payloads in parallel.
+	local pre_fetched = {}
+	local fetch_items = {}
+	for _, u in ipairs(upgrades) do
+		local info, err = builder.fetch_payload(u.manifest, { force = true, source = "remote" })
+		if info then
+			if info.cached then
+				pre_fetched[u.name] = info.cached
+			elseif info.url then
+				fetch_items[#fetch_items + 1] = {
+					url = info.url,
+					dest = info.dest,
+					label = u.manifest.name .. "-" .. u.manifest.version,
+					_name = u.name,
+				}
+			end
+		elseif err then
+			log.warn(("could not resolve payload for %s: %s"):format(u.name, tostring(err)))
+		end
+	end
+
+	if #fetch_items > 0 then
+		local dl_results = fetch.get_parallel(fetch_items)
+		for i, result in ipairs(dl_results) do
+			local item_name = fetch_items[i]._name
+			if result.err then
+				log.error("download failed for %s: %s", item_name, result.err)
+				return 1
+			elseif result.dest then
+				pre_fetched[item_name] = result.dest
+			end
+		end
+	end
+
+	-- Phase 3: Build, commit, and record each package sequentially.
 	for _, u in ipairs(upgrades) do
 		local iok, ierr = pcall(builder.install, u.manifest, {
 			force = true,
 			source = "remote",
 			kind = db.kind(u.name) or "package",
+			pre_fetched = pre_fetched[u.name],
 		})
 		if not iok then
 			log.error(tostring(ierr))
