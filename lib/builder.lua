@@ -77,7 +77,11 @@ local function make_p(manifest, dirs)
     end
     prefix = "cd " .. path.quote(self.cwd) .. " && "
     local full = prefix .. table.concat(parts, " ") .. " " .. cmd
-    log.detail(("$ %s"):format(cmd))
+    if config.get().verbose then
+      log.detail(("  run: %s"):format(full))
+    else
+      log.detail(("$ %s"):format(cmd))
+    end
     if not path.run(full) then
       error(("command failed for %s in %s: %s"):format(self.name, self.cwd, cmd), 0)
     end

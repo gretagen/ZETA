@@ -94,7 +94,11 @@ function commit.apply(staging, opts)
     local src = path.join(staging, e.rel)
     if e.type == "dir" then
       ensure_dir(dest)
-      log.detail(("provided directory %s"):format(e.rel))
+      if config.get().verbose then
+        log.detail(("  mkdir %s"):format(dest))
+      else
+        log.detail(("provided directory %s"):format(e.rel))
+      end
     else
       ensure_dir(path.dirname(dest))
       if e.type == "symlink" then
@@ -108,7 +112,11 @@ function commit.apply(staging, opts)
         if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(dest)) then
           error(("failed to create symlink %q"):format(dest), 0)
         end
-        log.detail(("provided symlink %s -> %s"):format(e.rel, e.target))
+        if config.get().verbose then
+          log.detail(("  link %s -> %s"):format(dest, e.target))
+        else
+          log.detail(("provided symlink %s -> %s"):format(e.rel, e.target))
+        end
       else
         if path.exists(dest) then
           log.detail(("overwriting existing %s"):format(e.rel))
@@ -125,7 +133,11 @@ function commit.apply(staging, opts)
           os.remove(tmp)
           error(("failed to install %q"):format(e.rel), 0)
         end
-        log.detail(("provided %s"):format(e.rel))
+        if config.get().verbose then
+          log.detail(("  install %s -> %s"):format(src, dest))
+        else
+          log.detail(("provided %s"):format(e.rel))
+        end
       end
     end
   end

@@ -45,6 +45,17 @@ Flags:
                           required by any installed package (never removes packages
                           installed explicitly)
 
+Configuration:
+  /etc/zeta/configuration.lua   System-wide configuration (Lua table)
+  Precedence: env vars > config file > defaults
+
+  Example /etc/zeta/configuration.lua:
+    return {
+      repo = "https://github.com/gretagen/zeta-packages",
+      root = "/",
+      verbose = false,
+    }
+
 Installed state is tracked in two registries under /var/db/zeta:
   packages/<name>      every package you installed explicitly
   dependencies/<name>  packages pulled in automatically as dependencies
@@ -56,6 +67,7 @@ Environment:
   ZETA_LOCAL_PACKAGES  Local /packages tree                          (default: /usr/share/packages)
   ZETA_CACHE           Download cache                                (default: $ZETA_ROOT/var/cache/zeta)
   ZETA_STATE           Package database                              (default: $ZETA_ROOT/var/db/zeta)
+  ZETA_VERBOSE         Verbose output (1 or true to enable)          (default: false)
 
 Package format (one package.lua per package, returning a table):
   return {

@@ -10,6 +10,7 @@ local fetch = {}
 local path = require("path")
 local log = require("log")
 local spinner = require("spinner")
+local config = require("config")
 
 local downloader
 
@@ -368,6 +369,14 @@ function fetch.get_parallel(items, opts)
     "progress=" .. path.quote(progress_file),
     "> \"$progress\"",
   }
+
+  -- Verbose: show all download URLs before starting.
+  if config.get().verbose then
+    for _, r in ipairs(remote) do
+      log.detail(("  fetch %s -> %s"):format(r.url, r.tmp))
+    end
+  end
+
   for _, r in ipairs(remote) do
     local dl_cmd
     if dl == "curl" then
@@ -410,46 +419,71 @@ function fetch.get_parallel(items, opts)
   os.remove(pid_file)
 
   -- Progress display
-  local spin_frames = { "/", "-", "\\", "|" }
-  local spin_idx = 0
   local completed = 0
   local total = #remote
   local use_spinner = spinner.enabled()
+  local seen = {}
+  local last_name = ""
+
+  -- Print the header line once.
+  if use_spinner then
+    io.write("  " .. progress_label .. "...\n")
+    io.flush()
+  end
 
   while pid and path.run("kill -0 " .. pid .. " 2>/dev/null") do
-    -- Count completed downloads from progress file
+    -- Count completed downloads and find the newest completion.
     local f = io.open(progress_file, "r")
     if f then
       local count = 0
-      for _ in f:lines() do count = count + 1 end
+      for line in f:lines() do
+        count = count + 1
+        local idx = tonumber(line)
+        if idx and not seen[idx] then
+          seen[idx] = true
+          last_name = remote[idx].label or ""
+        end
+      end
       f:close()
       if count > completed then
         completed = count
       end
     end
-    spin_idx = (spin_idx % #spin_frames) + 1
-    local spin_char = spin_frames[spin_idx]
+
     if use_spinner then
-      io.write(("\r\27[K  " .. progress_label .. "... [%d/%d] %s"):format(total, completed, total, spin_char))
+      local pct = math.floor(100 * completed / total)
+      local filled = math.floor(BAR_WIDTH * pct / 100)
+      local empty = BAR_WIDTH - filled
+      spin_idx = (spin_idx % #SPIN_FRAMES) + 1
+      local spinner_char = SPIN_FRAMES[spin_idx]
+      io.write(("\r\27[K  [" .. string.rep("=", filled) .. "%s" .. string.rep(" ", empty) .. "] %s  %d/%d"):format(spinner_char, last_name, completed, total))
       io.flush()
     end
     os.execute("sleep 0.1")
   end
 
-  -- Final count
+  -- Final count.
   local f = io.open(progress_file, "r")
   if f then
     local count = 0
-    for _ in f:lines() do count = count + 1 end
+    for line in f:lines() do
+      count = count + 1
+      local idx = tonumber(line)
+      if idx and not seen[idx] then
+        seen[idx] = true
+        last_name = remote[idx].label or ""
+      end
+    end
     f:close()
     completed = count
   end
 
   if use_spinner then
-    io.write(("\r\27[K  " .. progress_label .. "... [%d/%d]\n"):format(total, completed, total))
+    local filled = BAR_WIDTH
+    io.write(("\r\27[K  [" .. string.rep("=", filled) .. "] %s  %d/%d\n"):format(last_name, completed, total))
     io.flush()
   else
-    log.step((progress_label .. "... [%d/%d]"):format(total, completed, total))
+    log.step((progress_label .. "... [%d/%d]"):format(completed, total))
   end
 
   -- Read exit code
