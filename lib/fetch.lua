@@ -427,7 +427,7 @@ function fetch.get_parallel(items, opts)
 
   -- Print the header line once.
   if use_spinner then
-    io.write("  " .. progress_label .. "...\n")
+    io.write("  " .. progress_label:format(total) .. "...\n")
     io.flush()
   end
 
@@ -483,7 +483,7 @@ function fetch.get_parallel(items, opts)
     io.write(("\r\27[K  [" .. string.rep("=", filled) .. "] %s  %d/%d\n"):format(last_name, completed, total))
     io.flush()
   else
-    log.step((progress_label .. "... [%d/%d]"):format(completed, total))
+    log.step(progress_label:format(total) .. "... [" .. completed .. "/" .. total .. "]")
   end
 
   -- Read exit code
