@@ -83,4 +83,111 @@ suite:test("rejects absolute member", function()
   lib.assert_contains(err, "escapes")
 end)
 
+-- Build a minimal .deb: an ar(1) container with debian-binary, an empty
+-- control.tar.gz, and the given data.tar payload.
+local function ar_header(name, size)
+  local name16 = name .. "/" .. string.rep(" ", 15 - #name)
+  return name16                                          -- 16: name + "/"
+    .. string.rep("0", 12)                               -- 12: mtime
+    .. "0     "                                          --  6: owner
+    .. "0     "                                          --  6: group
+    .. "0100644 "                                        --  8: mode
+    .. ("%10d"):format(size)                             -- 10: size
+    .. "`\n"                                             --  2: magic
+end
+
+local function build_deb(data_tar_path)
+  local dir = lib.tmpdir("deb-build")
+  local members = {
+    { name = "debian-binary", data = "2.0\n" },
+    { name = "control.tar.gz", data = "" },
+    { name = "data.tar.gz", data = lib.read(data_tar_path) or "" },
+  }
+  local out = "!<arch>\n"
+  for _, m in ipairs(members) do
+    out = out .. ar_header(m.name, #m.data) .. m.data
+    if #m.data % 2 == 1 then out = out .. "\n" end
+  end
+  local deb = path.join(dir, "pkg.deb")
+  lib.write(deb, out)
+  return deb
+end
+
+suite:test("extracts a .deb's data.tar payload", function()
+  local dir = lib.tmpdir("deb-extract")
+  local pkg = path.join(dir, "tree")
+  os.execute("mkdir -p " .. path.quote(path.join(pkg, "usr/bin")))
+  lib.write(path.join(pkg, "usr/bin/hello"), "#!/bin/sh\necho hi\n")
+  local data_tar = path.join(dir, "data.tar.gz")
+  os.execute("tar -czf " .. path.quote(data_tar) .. " -C " .. path.quote(pkg) .. " usr 2>/dev/null")
+
+  local dest = lib.tmpdir("deb-stage")
+  local entries, err = archive.extract(build_deb(data_tar), dest, { tmp_dir = dir })
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_eq(lib.read(path.join(dest, "usr/bin/hello")), "#!/bin/sh\necho hi\n")
+end)
+
+suite:test("rejects a .deb whose data.tar escapes the root", function()
+  local dir = lib.tmpdir("deb-evil")
+  local deb = build_deb(craft_tar("../../escape", "boom"))
+  local dest = lib.tmpdir("deb-evil-stage")
+  local entries, err = archive.extract(deb, dest, { tmp_dir = dir })
+  lib.assert_nil(entries)
+  lib.assert_contains(err, "escapes")
+end)
+
+suite:test("rejects a payload that is not an ar archive", function()
+  local dir = lib.tmpdir("deb-notar")
+  local fake = path.join(dir, "fake.deb")
+  lib.write(fake, "this is not a deb\n")
+  local dest = lib.tmpdir("deb-notar-stage")
+  local entries, err = archive.extract(fake, dest, { tmp_dir = dir })
+  lib.assert_nil(entries)
+  lib.assert_contains(err, "not a Debian package")
+end)
+
+-- Regression: deb-aware strip detection
+suite:test("deb with ./ prefix + strip=1 strips correctly", function()
+  local dir = lib.tmpdir("deb-dot-strip")
+  local pkg = path.join(dir, "tree")
+  os.execute("mkdir -p " .. path.quote(path.join(pkg, "usr/bin")))
+  lib.write(path.join(pkg, "usr/bin/hello"), "#!/bin/sh\necho hi\n")
+  local data_tar = path.join(dir, "data.tar.gz")
+  os.execute("tar -czf " .. path.quote(data_tar) .. " -C " .. path.quote(pkg) .. " usr 2>/dev/null")
+
+  local dest = lib.tmpdir("deb-dot-strip-stage")
+  local entries, err = archive.extract(build_deb(data_tar), dest, { strip = 1, tmp_dir = dir })
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_true(lib.exists(path.join(dest, "usr/bin/hello")))
+end)
+
+suite:test("deb without ./ prefix + strip=1 disables strip", function()
+  local dir = lib.tmpdir("deb-nodot-strip")
+  local pkg = path.join(dir, "tree")
+  os.execute("mkdir -p " .. path.quote(path.join(pkg, "usr/bin")))
+  lib.write(path.join(pkg, "usr/bin/hello"), "#!/bin/sh\necho hi\n")
+  local data_tar = path.join(dir, "data.tar.gz")
+  os.execute("tar -czf " .. path.quote(data_tar) .. " -C " .. path.quote(pkg) .. " usr 2>/dev/null")
+
+  local dest = lib.tmpdir("deb-nodot-strip-stage")
+  local entries, err = archive.extract(build_deb(data_tar), dest, { strip = 1, tmp_dir = dir })
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_true(lib.exists(path.join(dest, "usr/bin/hello")))
+end)
+
+suite:test("native tar.gz with top-level dir + strip=1 still strips", function()
+  local dir = lib.tmpdir("native-strip-regression")
+  local pkg = path.join(dir, "pkg-1.0")
+  os.execute("mkdir -p " .. path.quote(path.join(pkg, "usr/bin")))
+  lib.write(path.join(pkg, "usr/bin/foo"), "#!/bin/sh\necho foo\n")
+  local tarball = path.join(dir, "pkg-1.0.tar.gz")
+  os.execute("tar -czf " .. path.quote(tarball) .. " -C " .. path.quote(dir) .. " pkg-1.0 2>/dev/null")
+
+  local dest = lib.tmpdir("native-strip-stage")
+  local entries, err = archive.extract(tarball, dest, { strip = 1 })
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_true(lib.exists(path.join(dest, "usr/bin/foo")))
+  lib.assert_false(lib.exists(path.join(dest, "pkg-1.0")))
+end)
+
 return suite

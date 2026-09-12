@@ -68,4 +68,46 @@ suite:test("fetch.read of a missing file errors", function()
   lib.assert_true(err ~= nil)
 end)
 
+suite:test("fetch.get_parallel copies multiple local files", function()
+  local src_dir = lib.tmpdir("fetch-para-src")
+  lib.write(path.join(src_dir, "a.txt"), "alpha")
+  lib.write(path.join(src_dir, "b.txt"), "bravo")
+  lib.write(path.join(src_dir, "c.txt"), "charlie")
+
+  local dst_dir = lib.tmpdir("fetch-para-dst")
+  local items = {
+    { url = path.join(src_dir, "a.txt"), dest = path.join(dst_dir, "a.txt") },
+    { url = path.join(src_dir, "b.txt"), dest = path.join(dst_dir, "sub", "b.txt") },
+    { url = path.join(src_dir, "c.txt"), dest = path.join(dst_dir, "c.txt") },
+  }
+  local results = fetch.get_parallel(items)
+  lib.assert_eq(#results, 3)
+  for i = 1, 3 do
+    lib.assert_true(results[i].dest ~= nil, "item " .. i .. " should succeed")
+  end
+  lib.assert_eq(lib.read(path.join(dst_dir, "a.txt")), "alpha")
+  lib.assert_eq(lib.read(path.join(dst_dir, "sub", "b.txt")), "bravo")
+  lib.assert_eq(lib.read(path.join(dst_dir, "c.txt")), "charlie")
+end)
+
+suite:test("fetch.get_parallel handles missing local files", function()
+  local src_dir = lib.tmpdir("fetch-para-fail-src")
+  lib.write(path.join(src_dir, "ok.txt"), "data")
+
+  local dst_dir = lib.tmpdir("fetch-para-fail-dst")
+  local items = {
+    { url = path.join(src_dir, "ok.txt"), dest = path.join(dst_dir, "ok.txt") },
+    { url = path.join(src_dir, "nope.txt"), dest = path.join(dst_dir, "nope.txt") },
+  }
+  local results = fetch.get_parallel(items)
+  lib.assert_eq(#results, 2)
+  lib.assert_true(results[1].dest ~= nil, "first item should succeed")
+  lib.assert_true(results[2].err ~= nil, "second item should fail")
+end)
+
+suite:test("fetch.get_parallel handles empty list", function()
+  local results = fetch.get_parallel({})
+  lib.assert_eq(#results, 0)
+end)
+
 return suite

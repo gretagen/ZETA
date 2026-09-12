@@ -264,7 +264,7 @@ function actions._install(name, flags, opts)
 		for i, result in ipairs(results) do
 			local item_name = fetch_items[i]._name
 			if result.err then
-				log.error("download failed for %s: %s", item_name, result.err)
+				log.error(("download failed for %s: %s"):format(item_name, result.err))
 				return 1
 			elseif result.dest then
 				pre_fetched[item_name] = result.dest
@@ -707,7 +707,7 @@ function actions.elevate(flags)
 		for i, result in ipairs(dl_results) do
 			local item_name = fetch_items[i]._name
 			if result.err then
-				log.error("download failed for %s: %s", item_name, result.err)
+				log.error(("download failed for %s: %s"):format(item_name, result.err))
 				return 1
 			elseif result.dest then
 				pre_fetched[item_name] = result.dest
