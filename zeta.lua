@@ -22,7 +22,8 @@ if not parsed then
 end
 
 -- Always print the resolved configuration so the user knows exactly where
--- Zeta will read from and write to (verbose by design).
+-- Zeta will read from and write to (verbose by design). --silence is wired
+-- inside cli.parse (lib/cli.lua) so every entry point honors it.
 local cfg = config.load(here)
 log.info(("zeta (lua %s) root=%s repo=%s"):format(_VERSION, cfg.root, cfg.repo))
 

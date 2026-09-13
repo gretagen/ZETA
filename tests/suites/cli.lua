@@ -83,6 +83,13 @@ suite:test("--detail is recorded", function()
   lib.assert_false(parse({ "-Remove", "app" }).flags.detail)
 end)
 
+suite:test("--silence is recorded", function()
+  local p = parse({ "-Provide", "gcc", "--silence" })
+  lib.assert_true(p.flags.silence)
+  lib.assert_eq(p.command, "provide")
+  lib.assert_false(parse({ "-Provide", "gcc" }).flags.silence)
+end)
+
 suite:test("unknown command is rejected", function()
   bad({ "-Nope" })
   bad({ "-Providex" })

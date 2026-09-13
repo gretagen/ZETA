@@ -94,10 +94,12 @@ function commit.apply(staging, opts)
     local src = path.join(staging, e.rel)
     if e.type == "dir" then
       ensure_dir(dest)
-      if config.get().verbose then
-        log.detail(("  mkdir %s"):format(dest))
-      else
-        log.detail(("provided directory %s"):format(e.rel))
+      if not log.is_file_silent() then
+        if config.get().verbose then
+          log.detail(("  mkdir %s"):format(dest))
+        else
+          log.detail(("provided directory %s"):format(e.rel))
+        end
       end
     else
       ensure_dir(path.dirname(dest))
@@ -112,13 +114,15 @@ function commit.apply(staging, opts)
         if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(dest)) then
           error(("failed to create symlink %q"):format(dest), 0)
         end
-        if config.get().verbose then
-          log.detail(("  link %s -> %s"):format(dest, e.target))
-        else
-          log.detail(("provided symlink %s -> %s"):format(e.rel, e.target))
+        if not log.is_file_silent() then
+          if config.get().verbose then
+            log.detail(("  link %s -> %s"):format(dest, e.target))
+          else
+            log.detail(("provided symlink %s -> %s"):format(e.rel, e.target))
+          end
         end
       else
-        if path.exists(dest) then
+        if path.exists(dest) and not log.is_file_silent() then
           log.detail(("overwriting existing %s"):format(e.rel))
         end
         -- Copy to a temp name then rename(): overwriting a running executable
@@ -133,10 +137,12 @@ function commit.apply(staging, opts)
           os.remove(tmp)
           error(("failed to install %q"):format(e.rel), 0)
         end
-        if config.get().verbose then
-          log.detail(("  install %s -> %s"):format(src, dest))
-        else
-          log.detail(("provided %s"):format(e.rel))
+        if not log.is_file_silent() then
+          if config.get().verbose then
+            log.detail(("  install %s -> %s"):format(src, dest))
+          else
+            log.detail(("provided %s"):format(e.rel))
+          end
         end
       end
     end

@@ -98,7 +98,10 @@ function archive.extract(archive_file, dest, opts)
   local ok, verr = archive.validate(entries)
   if not ok then return nil, verr end
   local strip = opts.strip or 0
-  local cmd = "tar -xvf " .. path.quote(archive_file)
+  -- --silence drops the -v member listing: "provided" chatter is the only
+  -- thing TTYs struggle to render, so suppression is scoped to per-file noise.
+  local listing = log.is_file_silent() and "-xf" or "-xvf"
+  local cmd = "tar " .. listing .. " " .. path.quote(archive_file)
     .. " -C " .. path.quote(dest) .. " --no-same-owner"
   if strip > 0 then
     cmd = cmd .. " --strip-components=" .. tostring(strip)

@@ -10,9 +10,26 @@ local log = {}
 
 local quiet = false
 
+-- Per-file output suppression (--silence): kills the "provided file ..."
+-- chatter and the tar -v extraction listing, without touching errors or the
+-- normal step/ok/info summary lines. Zeta stays verbose by design; --silence
+-- only trims per-file noise, primarily to speed up slow terminals.
+local file_silent = false
+
 -- Test harness hook: suppress all log output.
 function log.set_quiet(q)
   quiet = q and true or false
+end
+
+-- Enable/disable per-file output suppression. Returns the previous value.
+function log.set_file_silent(s)
+  local prev = file_silent
+  file_silent = s and true or false
+  return prev
+end
+
+function log.is_file_silent()
+  return file_silent
 end
 
 local function wants_color()

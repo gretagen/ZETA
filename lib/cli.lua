@@ -3,10 +3,13 @@
 -- Command tokens start with a single dash and match the documented forms
 -- (-Provide, -LocalProvide, -Remove, -List, -Localize, -Help, -ReProvide).
 -- Match is case-insensitive so -provide and -PROVIDE also work. Flags
--- start with a double dash (--pass, --force, --with-deps, --help).
+-- start with a double dash (--pass, --force, --with-deps, --detail,
+-- --silence, --help).
 -- Install/remove commands accept one or more package names.
 
 local cli = {}
+
+local log = require("log")
 
 local COMMANDS = {
   provide = true,
@@ -37,12 +40,12 @@ local MIN_ARGS = {
   remove = 1,
 }
 
--- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps, dir, files_path, version } }.
+-- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps, detail, silence, dir, files_path, version } }.
 -- Returns nil, errmsg on any parse problem.
 function cli.parse(args)
   local cmd
   local pos = {}
-  local flags = { pass = false, force = false, with_deps = false, detail = false }
+  local flags = { pass = false, force = false, with_deps = false, detail = false, silence = false }
 
   for _, a in ipairs(args) do
     if a:match("^%-%-") then
@@ -55,6 +58,12 @@ function cli.parse(args)
         flags.with_deps = true
       elseif key == "detail" then
         flags.detail = true
+      elseif key == "silence" then
+        flags.silence = true
+        -- Wire immediately at parse time so every entry point (zeta.lua,
+        -- bin/zeta, installed launchers) honors --silence without needing the
+        -- entry script itself to call log.set_file_silent().
+        log.set_file_silent(true)
       elseif key == "help" then
         cmd = "help"
       elseif key == "dir" then

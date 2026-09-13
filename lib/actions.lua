@@ -46,6 +46,8 @@ Flags:
                           required by any installed package (never removes packages
                           installed explicitly)
   --detail                With -Remove, list every file that would be deleted
+  --silence               Suppress per-file 'provided' output and tar extraction
+                          listings (faster on slow terminals)
 
 Configuration:
   /etc/zeta/configuration.lua   System-wide configuration (Lua table)
