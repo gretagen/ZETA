@@ -25,7 +25,7 @@ local function probe()
       parse = function(line) return line:match("=(%x+)") end },
   }
   for _, c in ipairs(candidates) do
-    local f = io.popen("command -v " .. c.cmd:match("^%S+") .. " 2>/dev/null")
+    local f = path.popen("command -v " .. c.cmd:match("^%S+") .. " 2>/dev/null")
     if f then
       local out = f:read("*l")
       f:close()
@@ -36,7 +36,7 @@ local function probe()
 end
 
 local function hash_with_tool(c, file)
-  local f = io.popen(c.cmd .. " " .. path.quote(file) .. " 2>/dev/null")
+  local f = path.popen(c.cmd .. " " .. path.quote(file) .. " 2>/dev/null")
   if not f then return nil end
   local line = f:read("*l")
   f:close()

@@ -45,7 +45,7 @@ function spinner.start(msg)
   if not is_tty() or active then return end
   active = true
   pidfile = path.join("/tmp", "zeta-spinner-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999)))
-  os.execute(spinner.build_script(msg) .. " & echo $! > " .. path.quote(pidfile))
+  path.run(spinner.build_script(msg) .. " & echo $! > " .. path.quote(pidfile))
   local f = io.open(pidfile, "rb")
   if f then
     pid = tonumber(f:read("*a")) or nil

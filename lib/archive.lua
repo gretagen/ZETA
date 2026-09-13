@@ -32,7 +32,7 @@ end
 -- member names, `tar -tvf` for the file type (verbose mode's leading char)
 -- and, for symlinks, the `name -> target` marker.
 function archive.entries(archive_file)
-  local nf = io.popen("tar -tf " .. path.quote(archive_file) .. " 2>/dev/null")
+  local nf = path.popen("tar -tf " .. path.quote(archive_file) .. " 2>/dev/null")
   if not nf then return nil, "could not run tar" end
   local names = {}
   for line in nf:lines() do
@@ -43,7 +43,7 @@ function archive.entries(archive_file)
   end
   nf:close()
 
-  local vf = io.popen("tar -tvf " .. path.quote(archive_file) .. " 2>/dev/null")
+  local vf = path.popen("tar -tvf " .. path.quote(archive_file) .. " 2>/dev/null")
   local entries = {}
   local i = 0
   if vf then
@@ -192,7 +192,7 @@ function archive.extract_deb(deb_file, dest, opts)
   -- or usr/... (non-prefixed, strip would eat the real first component).
   local strip = opts.strip or 0
   if strip > 0 then
-    local rf = io.popen("tar -tf " .. path.quote(tmp) .. " 2>/dev/null")
+    local rf = path.popen("tar -tf " .. path.quote(tmp) .. " 2>/dev/null")
     local first = rf and rf:read("*l") or ""
     if rf then rf:close() end
     if first ~= "" and not first:match("^%./") then

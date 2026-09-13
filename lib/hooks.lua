@@ -132,7 +132,7 @@ function hooks.run_installed(installed)
     return 0
   end
 
-  local f = io.popen("find " .. path.quote(hooks_dir)
+  local f = path.popen("find " .. path.quote(hooks_dir)
     .. " -type f -name '*.hook' 2>/dev/null | sort")
   if not f then return 0 end
   local files = {}

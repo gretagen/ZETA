@@ -79,7 +79,7 @@ local function ensure_migrated()
   if migrated[sd] or migrating[sd] then return end
   migrating[sd] = true
 
-  local f = io.popen("ls -1 " .. path.quote(sd) .. " 2>/dev/null")
+  local f = path.popen("ls -1 " .. path.quote(sd) .. " 2>/dev/null")
   if f then
     for line in f:lines() do
       if line ~= "" and line ~= "packages" and line ~= "dependencies" then
@@ -159,7 +159,7 @@ end
 
 local function list_dir(dir)
   local names = {}
-  local f = io.popen("ls -1 " .. path.quote(dir) .. " 2>/dev/null")
+  local f = path.popen("ls -1 " .. path.quote(dir) .. " 2>/dev/null")
   if f then
     for line in f:lines() do
       if line ~= "" and path.exists(path.join(dir, line, "meta.lua")) then

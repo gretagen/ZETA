@@ -16,7 +16,7 @@ local log = require("log")
 -- "file", "dir" or "symlink". Uses find -printf ('%y|%l|%P') which gives
 -- type, symlink target, and root-relative path on a single line.
 local function walk_staging(staging)
-  local f = io.popen("find " .. path.quote(staging)
+  local f = path.popen("find " .. path.quote(staging)
     .. " -mindepth 1 -printf '%y|%l|%P\\n' 2>/dev/null")
   if not f then
     error(("could not scan staging directory %s"):format(staging), 0)

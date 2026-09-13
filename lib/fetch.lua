@@ -30,7 +30,7 @@ function fetch.raw_github(url)
 end
 
 local function have(cmd)
-  local f = io.popen("command -v " .. cmd .. " 2>/dev/null")
+  local f = path.popen("command -v " .. cmd .. " 2>/dev/null")
   if not f then return false end
   local out = f:read("*l")
   f:close()
@@ -109,8 +109,7 @@ function fetch.get_with_progress(url, dest, label)
 
   local script
   if dl == "curl" then
-    script = [[#!/bin/sh
-URL="$1"
+    script = "#!" .. path.shell .. "\n" .. [[URL="$1"
 LABEL="$2"
 PROG="$3"
 TMP="$4"
@@ -173,8 +172,7 @@ echo $? > "]]  .. dest .. ".rc" .. [["
 ]]
   else
     -- wget: suppress output, show indeterminate animated bar.
-    script = [[#!/bin/sh
-URL="$1"
+    script = "#!" .. path.shell .. "\n" .. [[URL="$1"
 LABEL="$2"
 PROG="$3"
 TMP="$4"
@@ -364,7 +362,7 @@ function fetch.get_parallel(items, opts)
   local rc_file = "/tmp/zeta-rc-" .. tmp_suffix
 
   local script_lines = {
-    "#!/bin/sh",
+    "#!" .. path.shell,
     "fail=0",
     "progress=" .. path.quote(progress_file),
     "> \"$progress\"",

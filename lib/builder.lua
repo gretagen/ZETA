@@ -204,7 +204,7 @@ end
 -- Number of entries (files + dirs) below `dir`, 0 if empty or unreadable.
 -- Used by -Test's structural check to prove the pipeline produced something.
 local function count_tree(dir)
-  local f = io.popen("find " .. path.quote(dir) .. " 2>/dev/null | wc -l")
+  local f = path.popen("find " .. path.quote(dir) .. " 2>/dev/null | wc -l")
   if not f then return 0 end
   local line = f:read("*l")
   f:close()
@@ -297,7 +297,7 @@ function builder.install(manifest, opts)
   -- then refuse to install on a mismatched machine.
   if manifest.arch then
     local uname
-    local f = io.popen("uname -m 2>/dev/null")
+    local f = path.popen("uname -m 2>/dev/null")
     if f then
       uname = f:read("*l")
       f:close()

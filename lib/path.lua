@@ -104,13 +104,38 @@ end
 -- Subprocess helpers
 -- ---------------------------------------------------------------------------
 
--- Run a command, streaming its output to the parent (verbose by construction).
--- Returns true on exit status 0. Handles the os.execute return conventions of
--- Lua 5.1 (numeric code) and Lua 5.2+ (status, "exit"/"signal", code).
+-- Resolve the shell used for every subprocess. /bin/sh is not guaranteed to
+-- be POSIX-bash (e.g. Haliade's lean custom shell 'thesh' lacks redirections,
+-- $(...) substitution and control flow), so prefer bash when it exists and
+-- fall back to sh. The probe is deliberately minimal so the system sh (even a
+-- stripped one) can parse it: `bash -c 'echo OK'`.
+local function detect_shell()
+  -- Ask bash for its own absolute path (we need it for shebangs too). The
+  -- outer probe stays minimal so the system sh (even a stripped one) parses
+  -- it; the inner `command -v bash` runs inside bash itself.
+  local f = io.popen("bash -c 'command -v bash'")
+  if f then
+    local out = f:read("*l")
+    f:close()
+    if out and out:match("^/") then return out end
+  end
+  return "/bin/sh"
+end
+
+path.shell = detect_shell()
+
+-- Run a command through the resolved shell. Zero overhead on systems where
+-- /bin/sh already is bash; correctness on systems where it is not.
 function path.run(cmd)
-  local a, b, c = os.execute(cmd)
+  local a, b, c = os.execute(path.shell .. " -c " .. path.quote(cmd))
   if type(a) == "number" then return a == 0 end
   return a == true and b == "exit" and c == 0
+end
+
+-- io.popen through the resolved shell, matching path.run. Prefer this over
+-- raw io.popen(cmd) so captured-output commands behave identically.
+function path.popen(cmd)
+  return io.popen(path.shell .. " -c " .. path.quote(cmd))
 end
 
 -- mkdir -p wrapper. Safe: the directory name is shell-quoted.
@@ -122,7 +147,7 @@ end
 -- readlink wrapper: returns the symlink target, or nil when `p` is not a
 -- symlink (readlink(1) prints nothing and exits non-zero otherwise).
 function path.readlink(p)
-  local f = io.popen("readlink " .. path.quote(p) .. " 2>/dev/null")
+  local f = path.popen("readlink " .. path.quote(p) .. " 2>/dev/null")
   if not f then return nil end
   local target = f:read("*l")
   f:close()
@@ -146,7 +171,7 @@ end
 -- failure. Used by hooks to verify that hook files and their parent
 -- directories are owned by root and not writable by group or world.
 function path.stat_owner_and_perms(filepath)
-  local f = io.popen("stat -c '%u %a' " .. path.quote(filepath) .. " 2>/dev/null")
+  local f = path.popen("stat -c '%u %a' " .. path.quote(filepath) .. " 2>/dev/null")
   if not f then return nil end
   local line = f:read("*l")
   f:close()
