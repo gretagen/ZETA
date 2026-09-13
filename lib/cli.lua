@@ -42,7 +42,7 @@ local MIN_ARGS = {
 function cli.parse(args)
   local cmd
   local pos = {}
-  local flags = { pass = false, force = false, with_deps = false }
+  local flags = { pass = false, force = false, with_deps = false, detail = false }
 
   for _, a in ipairs(args) do
     if a:match("^%-%-") then
@@ -53,6 +53,8 @@ function cli.parse(args)
         flags.force = true
       elseif key == "with-deps" then
         flags.with_deps = true
+      elseif key == "detail" then
+        flags.detail = true
       elseif key == "help" then
         cmd = "help"
       elseif key == "dir" then

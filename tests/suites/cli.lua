@@ -76,6 +76,13 @@ suite:test("--with-deps is recorded", function()
   lib.assert_eq(p.command, "remove")
 end)
 
+suite:test("--detail is recorded", function()
+  local p = parse({ "-Remove", "app", "--detail" })
+  lib.assert_true(p.flags.detail)
+  lib.assert_eq(p.command, "remove")
+  lib.assert_false(parse({ "-Remove", "app" }).flags.detail)
+end)
+
 suite:test("unknown command is rejected", function()
   bad({ "-Nope" })
   bad({ "-Providex" })

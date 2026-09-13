@@ -41,9 +41,11 @@ Commands:
 Flags:
   --pass                  Skip the Y/N confirmation prompt and proceed immediately
   --force                 Override reverse-dependency and already-installed safety checks
+                          (removal still asks for confirmation)
   --with-deps             With -Remove, also remove dependencies that are no longer
                           required by any installed package (never removes packages
                           installed explicitly)
+  --detail                With -Remove, list every file that would be deleted
 
 Configuration:
   /etc/zeta/configuration.lua   System-wide configuration (Lua table)
@@ -89,21 +91,22 @@ function actions.help()
 end
 
 -- Y/N confirmation. --pass skips it. Returns true to proceed.
--- `suffix` defaults to "  Proceed? [y/N]"; dependency warnings carry their
--- own question text and pass " [y/N]".
-local function confirm(msg, pass, suffix)
-	suffix = suffix or "  Proceed? [Y/n]"
-	if pass then
-		return true
-	end
-	io.write(msg .. suffix .. " ")
-	io.flush()
-	local line = io.read("*l")
-	if not line then
-		return false
-	end
-	line = line:lower()
-	return line == "" or line == "y" or line == "yes"
+-- When `default_no` is true, an empty line cancels (default: " [y/N]").
+-- Otherwise an empty line proceeds (default: " [Y/n]").
+local function confirm(msg, pass, suffix, default_no)
+  suffix = suffix or (default_no and "  Proceed? [y/N]" or "  Proceed? [Y/n]")
+  if pass then
+    return true
+  end
+  io.write(msg .. suffix .. " ")
+  io.flush()
+  local line = io.read("*l")
+  if not line then
+    return false
+  end
+  line = line:lower()
+  if line == "" then return not default_no end
+  return line == "y" or line == "yes"
 end
 
 -- The database kind for a plan item: the explicit target becomes a package
@@ -467,134 +470,195 @@ function actions.test(name, flags)
 	return 0
 end
 
--- Unlink the owned files of an entry, skipping shared files, then prune
--- now-empty parents. `pkg_name` is used to check for other owners.
+-- Unlink the owned files of an entry, skipping unsafe paths and shared
+-- files, then prune now-empty parents. `pkg_name` is used to check
+-- other owners.
 local function delete_files(files, pkg_name)
-	local root = config.get().root
-	local dirs = {}
-	local seen = {}
-	for _, rel in ipairs(files) do
-		local others = db.other_owners(pkg_name, rel)
-		if #others > 0 then
-			log.detail(("  skipping %s (shared with %s)"):format(rel, table.concat(others, ", ")))
-		else
-			local p = path.join(root, rel)
-			os.remove(p)
-			log.detail(("  removed %s"):format(rel))
-			local d = path.dirname(p)
-			while d ~= "/" and d ~= "." and not seen[d] do
-				seen[d] = true
-				dirs[#dirs + 1] = d
-				d = path.dirname(d)
-			end
-		end
-	end
-	table.sort(dirs, function(a, b)
-		return #a > #b
-	end)
-	for _, d in ipairs(dirs) do
-		os.remove(d) -- rmdir; silently fails when non-empty
-	end
+  local root = config.get().root
+  local dirs = {}
+  local seen = {}
+  for _, rel in ipairs(files) do
+    if rel == "" or rel == "." or rel:match("^/") or rel:match("^%.%.")
+       or rel:match("%.%.%/") then
+      log.warn(("  skipping unsafe path %q"):format(rel))
+    elseif #db.other_owners(pkg_name, rel) > 0 then
+      log.detail(("  skipping %s (shared with %s)"):format(rel,
+        table.concat(db.other_owners(pkg_name, rel), ", ")))
+    else
+      local p = path.join(root, rel)
+      os.remove(p)
+      log.detail(("  removed %s"):format(rel))
+      local d = path.dirname(p)
+      while d ~= "/" and d ~= "." and not seen[d] do
+        seen[d] = true
+        dirs[#dirs + 1] = d
+        d = path.dirname(d)
+      end
+    end
+  end
+  table.sort(dirs, function(a, b)
+    return #a > #b
+  end)
+  for _, d in ipairs(dirs) do
+    os.remove(d) -- rmdir; silently fails when non-empty
+  end
 end
 
--- Remove one entry. Returns true, "removed"|"skip"|"abort" for handled
--- outcomes and nil, errmsg for hard failures. `via_cascade` marks entries
--- reached through --with-deps: those are never forced past remaining
--- dependents. `state` carries the shared removed/planned sets so names
--- touched earlier in the same invocation (explicitly or by the cascade) are
--- skipped rather than re-processed.
-local function remove_one(name, via_cascade, flags, state)
-	if state.removed[name] then
-		if not via_cascade then
-			log.info(("%s already removed, skipping"):format(name))
-		end
-		return true, "skip"
-	end
-	local kind = db.kind(name)
-	if not kind then
-		return nil, ("%s is not installed"):format(name)
-	end
+-- Helper: return reverse dependents of `name` that are NOT in `planned`.
+local function remaining_dependents(name, planned)
+  local out = {}
+  for _, d in ipairs(db.reverse_dependents(name)) do
+    if not planned[d] then
+      out[#out + 1] = d
+    end
+  end
+  return out
+end
 
-	-- Dependents still being removed in this same invocation do not block.
-	local rd = {}
-	for _, d in ipairs(db.reverse_dependents(name)) do
-		if not state.planned[d] then
-			rd[#rd + 1] = d
-		end
-	end
-
-	if #rd > 0 and not flags.force then
-		if via_cascade then
-			log.info(("skipping %s: still depended on by %s"):format(name, table.concat(rd, ", ")))
-			return true, "skip"
-		end
-		if kind == "package" then
-			return nil,
-				("cannot remove %s: still required by %s (use --force to override)"):format(
-					name,
-					table.concat(rd, ", ")
-				)
-		end
-	end
-
-	local proceed = flags.pass or flags.force
-	if not proceed then
-		if kind == "dependency" and #rd == 0 then
-			proceed = true -- orphaned dependency: no confirmation needed
-		elseif kind == "dependency" then
-			local who = #rd == 1 and rd[1] or (#rd .. " packages")
-			proceed = confirm(("%s is a dependency of %s, Proceed with removal?"):format(name, who), false, " [y/N]")
-		else
-			proceed = confirm(("Remove %s?"):format(name), false)
-		end
-	end
-	if not proceed then
-		log.info("aborted by user")
-		return true, "abort"
-	end
-
-	local m = db.get(name)
-	local files = db.files(name)
-	log.step(("removing %s-%s (%d files)"):format(name, m and m.version or "?", #files))
-	delete_files(files, name)
-	db.remove(name)
-	state.removed[name] = true
-	-- Drop this entry from the dependents lists of everything it depended on.
-	for _, d in ipairs(m and m.deps or {}) do
-		db.remove_dependent(d, name)
-	end
-	log.ok(("removed %s"):format(name))
-
-	if flags.with_deps then
-		for _, d in ipairs(m and m.deps or {}) do
-			-- Cascade only into dependency-kind entries; explicitly installed
-			-- packages are never removed implicitly.
-			if db.kind(d) == "dependency" then
-				remove_one(d, true, flags, state)
-			end
-		end
-	end
-	return true, "removed"
+-- Determine the transitive set of dependency-kind entries that would
+-- become orphaned if everything in `planned` were removed.  `seed` gives the
+-- starting removal order (the explicit targets, dependents first).  Returns
+-- two values: the full removal order (seed then cascaded deps) and a table
+-- of { dep = rd_list } for deps that were skipped because they are still
+-- required by something outside the plan.
+local function resolve_cascade(planned, seed)
+  local order = {}
+  for _, n in ipairs(seed) do
+    order[#order + 1] = n
+  end
+  local skip = {}
+  local i = 1
+  while i <= #order do
+    local n = order[i]
+    local m = db.get(n)
+    for _, dep in ipairs(m and m.deps or {}) do
+      if db.kind(dep) == "dependency" and not planned[dep] then
+        local rd = remaining_dependents(dep, planned)
+        if #rd == 0 then
+          planned[dep] = true
+          order[#order + 1] = dep
+        else
+          skip[dep] = rd
+        end
+      end
+    end
+    i = i + 1
+  end
+  return order, skip
 end
 
 function actions.remove(names, flags)
-	local state = { removed = {}, planned = {} }
-	for _, n in ipairs(names) do
-		state.planned[n] = true
-	end
-	for _, raw in ipairs(names) do
-		local name = path.sanitize_name(raw)
-		if not name then
-			log.error("invalid package name: " .. tostring(raw))
-			return 1
-		end
-		local ok, err = remove_one(name, false, flags, state)
-		if not ok then
-			log.error(err)
-			return 1
-		end
-	end
-	return 0
+  -- 1) Sanitize and validate all names up-front.
+  local targets = {}
+  for _, raw in ipairs(names) do
+    local name = path.sanitize_name(raw)
+    if not name then
+      log.error("invalid package name: " .. tostring(raw))
+      return 1
+    end
+    targets[#targets + 1] = name
+  end
+  for _, n in ipairs(targets) do
+    if not db.kind(n) then
+      log.error(("%s is not installed"):format(n))
+      return 1
+    end
+  end
+
+  -- 2) Build planned set from explicit targets.
+  local planned = {}
+  for _, n in ipairs(targets) do
+    planned[n] = true
+  end
+
+  -- 3) Hard reverse-dependency check for every explicit target.
+  if not flags.force then
+    for _, n in ipairs(targets) do
+      local rd = remaining_dependents(n, planned)
+      if #rd > 0 then
+        log.error(("cannot remove %s: still required by %s (use --force to override)"):format(
+          n, table.concat(rd, ", ")))
+        return 1
+      end
+    end
+  end
+
+  -- 4) Cascade into orphaned dependencies if --with-deps.
+  local removal_order = targets
+  local skipped = {}
+  if flags.with_deps then
+    removal_order, skipped = resolve_cascade(planned, targets)
+  end
+
+  -- 5) Build the full removal plan.
+  local plan = {}
+  for _, n in ipairs(removal_order) do
+    local m = db.get(n)
+    local files = db.files(n)
+    local shared = 0
+    for _, rel in ipairs(files) do
+      if #db.other_owners(n, rel) > 0 then
+        shared = shared + 1
+      end
+    end
+    plan[#plan + 1] = {
+      name = n,
+      version = m and m.version or "?",
+      kind = db.kind(n),
+      files = files,
+      shared = shared,
+      dependents = remaining_dependents(n, planned),
+    }
+  end
+
+  if #plan == 0 then
+    return 0
+  end
+
+  -- 6) Print the plan (mirrors -Provide).
+  print("")
+  for _, e in ipairs(plan) do
+    local count = #e.files == 1 and "1 file" or (#e.files .. " files")
+    local note = count
+    if e.shared > 0 then
+      note = note .. (", %d shared kept"):format(e.shared)
+    end
+    print(("  will remove %s-%s (%s)"):format(e.name, e.version, note))
+    if flags.detail then
+      for _, rel in ipairs(e.files) do
+        print(("      %s"):format(rel))
+      end
+    end
+    if #e.dependents > 0 then
+      print(("    !! removing %s breaks: %s"):format(
+        e.name, table.concat(e.dependents, ", ")))
+    end
+  end
+  for dep, rd in pairs(skipped) do
+    print(("  keep %s (still required by %s)"):format(
+      dep, table.concat(rd, ", ")))
+  end
+  print("")
+
+  -- 7) Single confirmation, default NO.
+  local noun = #plan == 1 and "1 package" or (#plan .. " packages")
+  if not confirm(("Remove %s?"):format(noun), flags.pass, " [y/N]", true) then
+    log.info("aborted by user")
+    return 0
+  end
+
+  -- 8) Execute removals.
+  for _, e in ipairs(plan) do
+    local m = db.get(e.name)
+    log.step(("removing %s-%s (%d files)"):format(e.name, e.version, #e.files))
+    delete_files(e.files, e.name)
+    db.remove(e.name)
+    for _, d in ipairs(m and m.deps or {}) do
+      db.remove_dependent(d, e.name)
+    end
+    log.ok(("removed %s"):format(e.name))
+  end
+  return 0
 end
 
 function actions.elevate(flags)
