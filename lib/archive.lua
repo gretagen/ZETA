@@ -10,6 +10,11 @@
 -- data.tar.*. Zeta only extracts the data member (a plain tar) -- maintainer
 -- scripts are out of scope, superseded by Zeta's own manifest and hooks. The
 -- ar container is parsed in pure Lua so no ar/dpkg dependency is dragged in.
+--
+-- An Arch/Artix .pkg.tar.{zst,xz} is a plain zstd/xz-compressed tar whose
+-- members are already anchored at the root (usr/bin/..., etc/...) and carry
+-- package metadata entries (.PKGINFO, .MTREE, .BUILDINFO, .INSTALL) that must
+-- not land in the extraction tree. GNU tar decompresses both natively.
 
 local archive = {}
 
@@ -87,12 +92,28 @@ function archive.validate(entries)
 end
 
 -- Extract `archive_file` into `dest`. Returns the validated entries, or
--- nil, err if validation or extraction fails.
+-- nil, err if validation or extraction fails. Dispatches on the archive's
+-- own filename so format-specific handling (deb payloads, Arch metadata)
+-- never depends on how the file was named in the cache.
 function archive.extract(archive_file, dest, opts)
   opts = opts or {}
-  if path.basename(archive_file):match("%.deb$") then
+  local name = path.basename(archive_file)
+  if name:match("%.deb$") then
     return archive.extract_deb(archive_file, dest, opts)
   end
+  if name:match("%.pkg%.tar%.zst$") or name:match("%.pkg%.tar%.xz$") then
+    return archive.extract_arch_pkg(archive_file, dest, opts)
+  end
+  return archive.extract_tar(archive_file, dest, opts)
+end
+
+-- Extract a plain tar archive (any compression tar understands) into `dest`.
+-- Same two-phase listing + validation as every other extractor. opts:
+--   strip    number of leading components to drop
+--   exclude  list of member globs to skip during extraction (they are still
+--            listed and validated, but never written to disk)
+function archive.extract_tar(archive_file, dest, opts)
+  opts = opts or {}
   local entries, err = archive.entries(archive_file)
   if not entries then return nil, err end
   local ok, verr = archive.validate(entries)
@@ -101,8 +122,13 @@ function archive.extract(archive_file, dest, opts)
   -- --silence drops the -v member listing: "provided" chatter is the only
   -- thing TTYs struggle to render, so suppression is scoped to per-file noise.
   local listing = log.is_file_silent() and "-xf" or "-xvf"
+  -- GNU tar only honors --exclude once it has seen the archive operand, so
+  -- the flags go AFTER the file name (before -f they are taken as operands).
   local cmd = "tar " .. listing .. " " .. path.quote(archive_file)
     .. " -C " .. path.quote(dest) .. " --no-same-owner"
+  for _, glob in ipairs(opts.exclude or {}) do
+    cmd = cmd .. " --exclude=" .. path.quote(glob)
+  end
   if strip > 0 then
     cmd = cmd .. " --strip-components=" .. tostring(strip)
   end
@@ -113,6 +139,33 @@ function archive.extract(archive_file, dest, opts)
     return nil, ("failed to extract %s"):format(archive_file)
   end
   return entries
+end
+
+-- Extract an Arch/Artix package (.pkg.tar.zst / .pkg.tar.xz). These are
+-- zstd/xz-compressed tars with two quirks over a plain tar:
+--   * Members have NO `./` prefix (usr/bin/..., etc/...), so a requested
+--     strip would silently eat the real first component. Strip is disabled
+--     unless members are `./`-prefixed (defensive; real packages never are).
+--   * .PKGINFO/.MTREE/.BUILDINFO/.INSTALL are package metadata, not owned
+--     files; they are excluded so they never reach the staging tree.
+-- Ownership is the manifest's job (files whitelist / commit provenance).
+function archive.extract_arch_pkg(archive_file, dest, opts)
+  opts = opts or {}
+  local strip = opts.strip or 0
+  if strip > 0 then
+    local rf = path.popen("tar -tf " .. path.quote(archive_file) .. " 2>/dev/null")
+    local first = rf and rf:read("*l") or ""
+    if rf then rf:close() end
+    if first ~= "" and not first:match("^%./") then
+      log.detail(("archive: %s has no ./ prefix, disabling strip"):format(
+        path.basename(archive_file)))
+      strip = 0
+    end
+  end
+  return archive.extract_tar(archive_file, dest, {
+    strip = strip,
+    exclude = { ".PKGINFO", ".MTREE", ".BUILDINFO", ".INSTALL" },
+  })
 end
 
 -- Locate the `data.tar.*` member of an ar (deb) container. ar member layout:

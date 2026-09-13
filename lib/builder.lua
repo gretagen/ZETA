@@ -30,6 +30,16 @@ local db = require("db")
 -- declared as dependencies of the package; we never inherit a host PATH.
 local BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
+-- Cache filename suffix for a payload url. Multi-part suffixes must be kept
+-- whole: archive.extract dispatches on the payload's own filename, so
+-- collapsing .pkg.tar.zst/.pkg.tar.xz to .zst/.xz would bypass the Arch
+-- package path (the .deb dispatch has always relied on this staying intact).
+local function cache_suffix(url)
+  if url:match("%.pkg%.tar%.zst$") then return "pkg.tar.zst" end
+  if url:match("%.pkg%.tar%.xz$") then return "pkg.tar.xz" end
+  return url:match("%.([%w]+)$") or "bin"
+end
+
 -- ---------------------------------------------------------------------------
 -- p object construction
 -- ---------------------------------------------------------------------------
@@ -122,8 +132,7 @@ local function make_p(manifest, dirs)
   -- Cache filename for a url, keyed by name-version-extension so reinstalls
   -- reuse the already-downloaded artifact.
   function p:cache_path(url)
-    local ext = url:match("%.([%w]+)$") or "bin"
-    return path.join(self.cache_dir, self.name .. "-" .. self.version .. "." .. ext)
+    return path.join(self.cache_dir, self.name .. "-" .. self.version .. "." .. cache_suffix(url))
   end
 
   -- Download `url` (default: the manifest url) and verify its sha256.
@@ -259,9 +268,8 @@ function builder.fetch_payload(manifest, opts)
     resolved = path.join(opts.local_dir, url)
   end
   -- Build a cache path using the same logic as make_p:cache_path
-  local ext = url:match("%.([%w]+)$") or "bin"
   local dest = path.join(config.get().cache_dir,
-    manifest.name .. "-" .. manifest.version .. "." .. ext)
+    manifest.name .. "-" .. manifest.version .. "." .. cache_suffix(url))
   if path.exists(dest) then
     return { cached = dest }
   end

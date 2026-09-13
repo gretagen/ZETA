@@ -190,4 +190,54 @@ suite:test("native tar.gz with top-level dir + strip=1 still strips", function()
   lib.assert_false(lib.exists(path.join(dest, "pkg-1.0")))
 end)
 
+-- Build a real Arch-style package: .PKGINFO/.MTREE metadata plus a usr tree,
+-- stored WITHOUT a ./ prefix (the exact layout Artix/Arch publish).
+local function build_arch_pkg(dir, comp)
+  local pkg = path.join(dir, "tree")
+  os.execute("mkdir -p " .. path.quote(path.join(pkg, "usr/bin")))
+  lib.write(path.join(pkg, "usr/bin/hello"), "#!/bin/sh\necho hi\n")
+  lib.write(path.join(pkg, ".PKGINFO"), "pkgname=hello\n")
+  lib.write(path.join(pkg, ".MTREE"), "")
+local plain = path.join(dir, "payload.tar")
+  os.execute("tar -cf " .. path.quote(plain) .. " -C " .. path.quote(pkg) .. " .PKGINFO .MTREE usr 2>/dev/null")
+  local tool = (comp == "xz") and "xz" or "zstd"
+  local out = path.join(dir, "hello-1.0.pkg.tar." .. comp)
+  os.execute(tool .. " -q -f -c " .. path.quote(plain) .. " > " .. path.quote(out) .. " 2>/dev/null")
+  return out
+end
+
+-- Arch members have no ./ prefix, so strip=1 must be ignored (it would eat
+-- `usr`), and the metadata members must never reach the staging tree.
+local function run_arch_pkg_asserts(comp)
+  local dir = lib.tmpdir("arch-pkg-" .. comp)
+  local pkg = build_arch_pkg(dir, comp)
+  local dest = lib.tmpdir("arch-pkg-stage-" .. comp)
+  local entries, err = archive.extract(pkg, dest, { strip = 1 })
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_eq(lib.read(path.join(dest, "usr/bin/hello")), "#!/bin/sh\necho hi\n")
+  lib.assert_false(lib.exists(path.join(dest, "bin/hello")), "strip ate usr")
+  lib.assert_false(lib.exists(path.join(dest, ".PKGINFO")), "metadata leaked")
+  lib.assert_false(lib.exists(path.join(dest, ".MTREE")), "metadata leaked")
+end
+
+suite:test("extracts a .pkg.tar.zst like an Arch package", function()
+  run_arch_pkg_asserts("zst")
+end)
+
+suite:test("extracts a .pkg.tar.xz like an Arch package", function()
+  run_arch_pkg_asserts("xz")
+end)
+
+-- Metadata must also stay out at the entries level, and dispatch must work
+-- when the payload went through the cache (which keeps the full suffix).
+suite:test(".pkg.tar.zst validates its members like any tar", function()
+  local dir = lib.tmpdir("arch-zst-validate")
+  local pkg = build_arch_pkg(dir, "zst")
+  lib.assert_true(lib.exists(pkg), "fixture not built")
+  local entries, err = archive.entries(pkg)
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_true(#entries > 0, "no members listed")
+  lib.assert_eq(archive.validate(entries), true)
+end)
+
 return suite
