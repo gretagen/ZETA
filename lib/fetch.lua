@@ -24,6 +24,17 @@ function fetch.raw_github(url)
   url = url:gsub("^https?://www%.github%.com/", "https://github.com/")
   local owner, repo, rest = url:match("^https?://github%.com/([^/]+)/([^/]+)(.*)$")
   if owner and repo then
+    -- Paths under known GitHub router segments are NOT raw tree paths and
+    -- must be left untouched: release assets (releases/download/...) 302 to
+    -- the CDN blob store (curl -L follows), and blob/tree/raw/archive/wiki
+    -- each have their own resolver. Rewriting them into
+    -- raw.githubusercontent.com/OWNER/REPO/refs/heads/main/... yields a
+    -- 404 (observed with the libreoffice release asset).
+    local kind = rest:match("^/([^/]+)/") or rest:match("^/([^/]+)$") or ""
+    if kind == "releases" or kind == "archive" or kind == "blob"
+       or kind == "raw" or kind == "tree" or kind == "wiki" then
+      return url
+    end
     return "https://raw.githubusercontent.com/" .. owner .. "/" .. repo .. "/refs/heads/main" .. rest
   end
   return url

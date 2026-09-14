@@ -36,6 +36,24 @@ suite:test("non-github and local urls are unchanged", function()
   lib.assert_eq(fetch.raw_github("x-1.0.tar.gz"), "x-1.0.tar.gz")
 end)
 
+suite:test("release asset urls are left untouched (no raw rewrite)", function()
+  local u = "https://github.com/gretagen/zeta-deliverance/releases/download/libreoffice-26.2.5.2/libreoffice-26.2.5.2.deb"
+  lib.assert_eq(fetch.raw_github(u), u)
+end)
+
+suite:test("github router segments (blob/tree/archive/raw/wiki) untouched", function()
+  local cases = {
+    "https://github.com/a/b/blob/main/src/main.c",
+    "https://github.com/a/b/tree/main/src",
+    "https://github.com/a/b/archive/refs/tags/v1.0.tar.gz",
+    "https://github.com/a/b/raw/main/README.md",
+    "https://github.com/a/b/wiki",
+  }
+  for _, u in ipairs(cases) do
+    lib.assert_eq(fetch.raw_github(u), u, "expected unchanged: " .. u)
+  end
+end)
+
 suite:test("fetch.get copies a local file, creating parents", function()
   local src = path.join(lib.tmpdir("fetch-src"), "a.txt")
   lib.write(src, "hello")
