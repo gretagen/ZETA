@@ -85,4 +85,10 @@ function log.detail(msg)
   print(paint("dim", " .   " .. msg))
 end
 
+-- Always print, even under --silence. Used for the startup banner so the user
+-- always sees where Zeta will operate regardless of output suppression.
+function log.banner(msg)
+  print(" -   " .. msg)
+end
+
 return log

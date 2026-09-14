@@ -21,6 +21,7 @@ local manifest = require("manifest")
 local vercmp = require("vercmp")
 local hooks = require("hooks")
 local fetch = require("fetch")
+local spinner = require("spinner")
 
 local HELP = [[
 Zeta -- Haliade OS package manager
@@ -212,6 +213,8 @@ function actions._install(name, flags, opts)
 		return fetch_manifest(n)
 	end
 
+	os.execute("sleep 1")
+	spinner.start("Resolving dependencies")
 	local ok, plan = pcall(deps.resolve, name, {
 		fetch_manifest = cached_fetch_manifest,
 		installed_version = function(n)
@@ -219,12 +222,24 @@ function actions._install(name, flags, opts)
 			return m and m.version or nil
 		end,
 	})
+	spinner.stop()
 	if not ok then
 		log.error(tostring(plan))
 		return 1
 	end
 	if #plan == 0 then
 		return 0
+	end
+
+	-- Identify which repo the target package belongs to by inspecting the
+	-- manifest URL. The repo name lives in the path between the host and the
+	-- packages/ prefix: .../zeta-<kind>/.../<name>/package.lua
+	local target_item = plan[#plan]
+	if target_item and target_item.manifest.url then
+		local repo_name = target_item.manifest.url:match("zeta%-([^/]+)")
+		if repo_name then
+			log.step("Core package found at: zeta-" .. repo_name)
+		end
 	end
 
 	for _, item in ipairs(plan) do
