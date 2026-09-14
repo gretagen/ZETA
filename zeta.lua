@@ -26,9 +26,6 @@ end
 -- inside cli.parse (lib/cli.lua) so every entry point honors it.
 local cfg = config.load(here)
 log.banner("Initializing ZETA...")
-log.banner("powered by lua " .. _VERSION)
-log.banner("repository: " .. cfg.repo)
-log.banner("taking action in root=" .. cfg.root)
 
 local dispatch = {
   provide = function(a, f) return actions.provide(a, f) end,

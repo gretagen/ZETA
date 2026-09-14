@@ -440,6 +440,9 @@ function fetch.get_parallel(items, opts)
     io.flush()
   end
 
+  local start_time = os.time()
+  local slow_warned = false
+
   while pid and path.run("kill -0 " .. pid .. " 2>/dev/null") do
     -- Count completed downloads and find the newest completion.
     local f = io.open(progress_file, "r")
@@ -469,6 +472,11 @@ function fetch.get_parallel(items, opts)
       io.flush()
     end
     os.execute("sleep 0.1")
+    if not slow_warned and os.time() - start_time > 30 then
+      slow_warned = true
+      io.write("\n  download is taking longer than expected, hang in there.\n")
+      io.flush()
+    end
   end
 
   -- Final count.
