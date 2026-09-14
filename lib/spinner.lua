@@ -26,7 +26,7 @@ end
 -- Build the shell command that animates `msg` on one line in the background.
 -- Exported for tests; start() runs it with `&` and remembers the pid.
 function spinner.build_script(msg)
-  local script = "while :; do "
+  local script = "trap 'kill 0; exit 130' INT; while :; do "
   for _, f in ipairs(FRAMES) do
     script = script .. string.format("printf '\\r  %%s %%s' %s %s 2>/dev/null; sleep 0.1;",
       path.quote(msg), path.quote(f))
@@ -51,12 +51,14 @@ function spinner.start(msg)
     pid = tonumber(f:read("*a")) or nil
     f:close()
   end
+  path.on_cleanup(spinner._cleanup_hook)
 end
 
 -- Stop animating and clear the spinner line.
 function spinner.stop()
   if not active then return end
   active = false
+  path.remove_cleanup(spinner._cleanup_hook)
   if pid then
     path.run("kill " .. tostring(pid) .. " 2>/dev/null")
     pid = nil
@@ -67,6 +69,18 @@ function spinner.stop()
   end
   io.write("\r\27[K")
   io.flush()
+end
+
+-- Internal cleanup hook: kills the spinner process tree on signal.
+function spinner._cleanup_hook()
+  if pid then
+    path.run("kill " .. tostring(pid) .. " 2>/dev/null")
+    pid = nil
+  end
+  if pidfile then
+    os.remove(pidfile)
+    pidfile = nil
+  end
 end
 
 return spinner

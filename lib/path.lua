@@ -7,6 +7,31 @@
 local path = {}
 
 -- ---------------------------------------------------------------------------
+-- Cleanup hooks for signal handling
+-- ---------------------------------------------------------------------------
+
+-- Functions registered here are called by path.run_cleanup() so background
+-- processes (spinner, download scripts) are killed on Ctrl+C.
+local cleanup_hooks = {}
+
+function path.on_cleanup(fn)
+  cleanup_hooks[#cleanup_hooks + 1] = fn
+end
+
+function path.remove_cleanup(fn)
+  for i = #cleanup_hooks, 1, -1 do
+    if cleanup_hooks[i] == fn then
+      table.remove(cleanup_hooks, i)
+      return
+    end
+  end
+end
+
+function path.run_cleanup()
+  for _, fn in ipairs(cleanup_hooks) do fn() end
+end
+
+-- ---------------------------------------------------------------------------
 -- String helpers
 -- ---------------------------------------------------------------------------
 

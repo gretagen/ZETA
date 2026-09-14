@@ -7,6 +7,7 @@ package.path = here .. "/lib/?.lua;" .. package.path
 
 local cli = require("cli")
 local log = require("log")
+local path = require("path")
 local config = require("config")
 local actions = require("actions")
 
@@ -42,6 +43,9 @@ local dispatch = {
 local ok, code = pcall(function()
   return dispatch[parsed.command](parsed.args, parsed.flags)
 end)
+
+-- Kill orphaned background processes (spinner, download scripts) on exit.
+path.run_cleanup()
 
 if not ok then
   log.error(tostring(code))

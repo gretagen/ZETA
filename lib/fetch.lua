@@ -120,7 +120,8 @@ function fetch.get_with_progress(url, dest, label)
 
   local script
   if dl == "curl" then
-    script = "#!" .. path.shell .. "\n" .. [[URL="$1"
+    script = "#!" .. path.shell .. "\n" .. [[trap 'kill 0; exit 130' INT
+URL="$1"
 LABEL="$2"
 PROG="$3"
 TMP="$4"
@@ -183,7 +184,8 @@ echo $? > "]]  .. dest .. ".rc" .. [["
 ]]
   else
     -- wget: suppress output, show indeterminate animated bar.
-    script = "#!" .. path.shell .. "\n" .. [[URL="$1"
+    script = "#!" .. path.shell .. "\n" .. [[trap 'kill 0; exit 130' INT
+URL="$1"
 LABEL="$2"
 PROG="$3"
 TMP="$4"
@@ -374,6 +376,7 @@ function fetch.get_parallel(items, opts)
 
   local script_lines = {
     "#!" .. path.shell,
+    "trap 'kill 0; exit 130' INT",
     "fail=0",
     "progress=" .. path.quote(progress_file),
     "> \"$progress\"",
@@ -427,6 +430,15 @@ function fetch.get_parallel(items, opts)
   end
   os.remove(pid_file)
 
+  -- Register cleanup so Ctrl+C kills the background download script.
+  local function parallel_cleanup()
+    if pid then
+      path.run("kill " .. tostring(pid) .. " 2>/dev/null")
+      pid = nil
+    end
+  end
+  path.on_cleanup(parallel_cleanup)
+
   -- Progress display
   local completed = 0
   local total = #remote
@@ -478,6 +490,8 @@ function fetch.get_parallel(items, opts)
       io.flush()
     end
   end
+
+  path.remove_cleanup(parallel_cleanup)
 
   -- Final count.
   local f = io.open(progress_file, "r")
