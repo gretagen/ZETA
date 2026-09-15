@@ -22,6 +22,12 @@ local path = require("path")
 local log = require("log")
 local config = require("config")
 
+-- GNU tar shells out to the external zstd binary for decompression. When the
+-- container's zstd is linked against a different libzstd version, it crashes
+-- with "undefined symbol: POOL_free". Setting LD_LIBRARY_PATH ensures the
+-- correct libzstd is found at runtime.
+local TAR_ENV = "LD_LIBRARY_PATH=/usr/lib"
+
 local function rel_of(member)
   local rel = member:gsub("^%./+", "")
   rel = rel:gsub("/+$", "")
@@ -37,7 +43,7 @@ end
 -- member names, `tar -tvf` for the file type (verbose mode's leading char)
 -- and, for symlinks, the `name -> target` marker.
 function archive.entries(archive_file)
-  local nf = path.popen("tar -tf " .. path.quote(archive_file) .. " 2>/dev/null")
+  local nf = path.popen(TAR_ENV .. " tar -tf " .. path.quote(archive_file) .. " 2>/dev/null")
   if not nf then return nil, "could not run tar" end
   local names = {}
   for line in nf:lines() do
@@ -48,7 +54,7 @@ function archive.entries(archive_file)
   end
   nf:close()
 
-  local vf = path.popen("tar -tvf " .. path.quote(archive_file) .. " 2>/dev/null")
+  local vf = path.popen(TAR_ENV .. " tar -tvf " .. path.quote(archive_file) .. " 2>/dev/null")
   local entries = {}
   local i = 0
   if vf then
@@ -124,7 +130,7 @@ function archive.extract_tar(archive_file, dest, opts)
   local listing = log.is_file_silent() and "-xf" or "-xvf"
   -- GNU tar only honors --exclude once it has seen the archive operand, so
   -- the flags go AFTER the file name (before -f they are taken as operands).
-  local cmd = "tar " .. listing .. " " .. path.quote(archive_file)
+  local cmd = TAR_ENV .. " tar " .. listing .. " " .. path.quote(archive_file)
     .. " -C " .. path.quote(dest) .. " --no-same-owner"
   for _, glob in ipairs(opts.exclude or {}) do
     cmd = cmd .. " --exclude=" .. path.quote(glob)
@@ -153,7 +159,7 @@ function archive.extract_arch_pkg(archive_file, dest, opts)
   opts = opts or {}
   local strip = opts.strip or 0
   if strip > 0 then
-    local rf = path.popen("tar -tf " .. path.quote(archive_file) .. " 2>/dev/null")
+    local rf = path.popen(TAR_ENV .. " tar -tf " .. path.quote(archive_file) .. " 2>/dev/null")
     local first = rf and rf:read("*l") or ""
     if rf then rf:close() end
     if first ~= "" and not first:match("^%./") then
