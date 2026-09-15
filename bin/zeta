@@ -1,3 +1,9 @@
 #!/bin/bash
 # zeta launcher: runs the entry point with the system Lua interpreter.
+
+if [ "$EUID" -ne 0 ]; then
+    echo "ZETA requires superuser privileges to function."
+    exit 1
+fi
+
 exec lua "$(dirname "$0")/../zeta.lua" "$@"

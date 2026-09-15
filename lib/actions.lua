@@ -32,7 +32,7 @@ Commands:
   -Provide <pkg>...       Install packages and their dependencies from the remote repository
   -ReProvide <pkg>...     Reinstall packages even if they are already installed
   -LocalProvide <pkg>...  Install packages from the local /packages tree
-  -Elevate                Update all installed packages to their latest versions
+  -Transcend              Update all installed packages to their latest versions
   -Remove <pkg>...        Remove installed packages (see --with-deps)
   -List                   List installed packages and dependencies
   -Localize <query>       Search the remote repository index for <query>
@@ -295,7 +295,7 @@ function actions._install(name, flags, opts)
 	-- Phase 2: Build, commit, and record each package sequentially.
 	for _, item in ipairs(plan) do
 		if db.is_installed(item.name) and not flags.force then
-			log.warn(("%s already installed, skipping"):format(item.name))
+			log.warn(("%s already provided, skipping"):format(item.name))
 		else
 			local iok, ierr = pcall(builder.install, item.manifest, {
 				force = flags.force,
@@ -331,7 +331,7 @@ function actions.provide(names, flags)
 		end
 		if not flags.force and db.is_installed(name) then
 			local m = db.get(name)
-			log.warn(("%s-%s is already installed -- use -ReProvide to reinstall"):format(name, m and m.version or "?"))
+			log.warn(("%s-%s has already been provided -- use -ReProvide instead"):format(name, m and m.version or "?"))
 		else
 			local ok = actions._install(name, flags, { source = "remote" })
 			if ok ~= 0 then
@@ -366,7 +366,7 @@ function actions.localprovide(names, flags)
 		end
 		if not flags.force and db.is_installed(name) then
 			local m = db.get(name)
-			log.warn(("%s-%s is already installed -- use -ReProvide to reinstall"):format(name, m and m.version or "?"))
+			log.warn(("%s-%s has already been provided, use -ReProvide instead."):format(name, m and m.version or "?"))
 		else
 			local ok = actions._install(name, flags, { source = "local" })
 			if ok ~= 0 then
@@ -392,7 +392,7 @@ function actions.list()
 	local packages = db.list_packages()
 	local dependencies = db.list_dependencies()
 	if #packages == 0 and #dependencies == 0 then
-		log.info("no packages installed")
+		log.info("no packages provided")
 		return 0
 	end
 	if #packages > 0 then
@@ -570,14 +570,14 @@ function actions.remove(names, flags)
   for _, raw in ipairs(names) do
     local name = path.sanitize_name(raw)
     if not name then
-      log.error("invalid package name: " .. tostring(raw))
+      log.error("package is invalid : " .. tostring(raw))
       return 1
     end
     targets[#targets + 1] = name
   end
   for _, n in ipairs(targets) do
     if not db.kind(n) then
-      log.error(("%s is not installed"):format(n))
+      log.error(("%s has not been provided."):format(n))
       return 1
     end
   end
@@ -593,7 +593,7 @@ function actions.remove(names, flags)
     for _, n in ipairs(targets) do
       local rd = remaining_dependents(n, planned)
       if #rd > 0 then
-        log.error(("cannot remove %s: still required by %s (use --force to override)"):format(
+        log.error(("Unable to remove %s as it is still required by %s if you are sure about this, use --force flag"):format(
           n, table.concat(rd, ", ")))
         return 1
       end
@@ -678,10 +678,10 @@ function actions.remove(names, flags)
   return 0
 end
 
-function actions.elevate(flags)
-	local installed = db.list_packages()
+function actions.transcend(flags)
+	local installed = db.list()
 	if #installed == 0 then
-		log.info("no packages installed")
+		log.info("no packages provided")
 		return 0
 	end
 
@@ -696,18 +696,18 @@ function actions.elevate(flags)
 			installed_info[name] = cur
 			items[#items + 1] = {
 				url = repo.manifest_url(name),
-				dest = path.join(cfg.tmp_dir, "elevate-" .. name .. "-" .. tostring(math.random(10000, 99999)) .. ".lua"),
+				dest = path.join(cfg.tmp_dir, "transcend-" .. name .. "-" .. tostring(math.random(10000, 99999)) .. ".lua"),
 				_name = name,
 			}
 		end
 	end
 
 	if #items == 0 then
-		log.info("no packages installed")
+		log.info("no packages provided")
 		return 0
 	end
 
-	local results = fetch.get_parallel(items, { label = "checking for packages to elevate" })
+	local results = fetch.get_parallel(items, { label = "checking for packages to transcend" })
 	local manifest_cache = {}
 	for i, result in ipairs(results) do
 		local name = items[i]._name
@@ -753,11 +753,11 @@ function actions.elevate(flags)
 
 	print("")
 	for _, u in ipairs(upgrades) do
-		print(("  will upgrade %s %s -> %s"):format(u.name, u.from, u.to))
+		print(("  will transcend %s %s -> %s"):format(u.name, u.from, u.to))
 	end
 	print("")
 
-	if not confirm(("Upgrade %d package(s)?"):format(#upgrades), flags.pass) then
+	if not confirm(("Transcend %d package(s)?"):format(#upgrades), flags.pass) then
 		log.info("aborted by user")
 		return 0
 	end

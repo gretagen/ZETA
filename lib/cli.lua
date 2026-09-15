@@ -15,7 +15,7 @@ local COMMANDS = {
   provide = true,
   reprovide = true,
   localprovide = true,
-  elevate = true,
+  transcend = true,
   remove = true,
   list = true,
   localize = true,
@@ -28,7 +28,7 @@ local ARITY = {
   localize = 1,
   test = 1,
   list = 0,
-  elevate = 0,
+  transcend = 0,
   help = 0,
 }
 
@@ -81,7 +81,7 @@ function cli.parse(args)
       if COMMANDS[c] then
         cmd = c
       else
-        return nil, ("unknown command: %s (run 'zeta -Help')"):format(a)
+        return nil, ("unknown command."):format(a)
       end
     elseif not cmd then
       return nil, ("expected a command first, got %q"):format(a)
@@ -91,7 +91,7 @@ function cli.parse(args)
   end
 
   if not cmd then
-    return nil, "no command given (run 'zeta -Help')"
+    return nil, "no command specified."
   end
 
   local want = ARITY[cmd]

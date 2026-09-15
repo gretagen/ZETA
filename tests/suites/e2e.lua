@@ -100,7 +100,7 @@ repo_write("index.lua",
 
 -- upgradable: v1.0 payload (what gets installed initially)
 local upg1_tar, upg1_sha = make_payload("upgradable-v1", { ["usr/bin/upgradable"] = "#!/bin/sh\necho v1\n" })
--- upgradable: v2.0 payload (what -Elevate should upgrade to)
+-- upgradable: v2.0 payload (what -Transcend should upgrade to)
 local upg2_tar, upg2_sha = make_payload("upgradable-v2", { ["usr/bin/upgradable"] = "#!/bin/sh\necho v2\n" })
 
 -- shared1 and shared2: both install the same file (usr/lib/shared.so)
@@ -507,10 +507,10 @@ suite:test("-Test fails when a dependency is missing locally", function()
 end)
 
 -- ---------------------------------------------------------------------------
--- -Elevate tests
+-- -Transcend tests
 -- ---------------------------------------------------------------------------
 
-suite:test("-Elevate upgrades packages to newer versions", function()
+suite:test("-Transcend upgrades packages to newer versions", function()
   local e = fresh_env()
   -- Install v1.0
   lib.run_zeta({ "-Provide", "upgradable", "--pass" }, e)
@@ -520,8 +520,8 @@ suite:test("-Elevate upgrades packages to newer versions", function()
   repo_write("upgradable/package.lua",
     "return { name='upgradable', version='2.0', summary='upgrade test v2', url='"
       .. file_url(upg2_tar) .. "', sha256='" .. upg2_sha .. "', deps={}, archive={strip=1} }\n")
-  -- Run elevate
-  local code, out = lib.run_zeta({ "-Elevate", "--pass" }, e)
+  -- Run transcend
+  local code, out = lib.run_zeta({ "-Transcend", "--pass" }, e)
   lib.assert_eq(code, 0, out)
   lib.assert_contains(out, "will upgrade upgradable 1.0 -> 2.0")
   -- Verify updated
@@ -530,7 +530,7 @@ suite:test("-Elevate upgrades packages to newer versions", function()
   lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/upgradable")))
 end)
 
-suite:test("-Elevate reports up-to-date when nothing to upgrade", function()
+suite:test("-Transcend reports up-to-date when nothing to upgrade", function()
   local e = fresh_env()
   lib.run_zeta({ "-Provide", "upgradable", "--pass" }, e)
   -- Upgrade to v2.0 via a second provide (repo has v2.0)
@@ -538,14 +538,14 @@ suite:test("-Elevate reports up-to-date when nothing to upgrade", function()
     "return { name='upgradable', version='2.0', summary='upgrade test v2', url='"
       .. file_url(upg2_tar) .. "', sha256='" .. upg2_sha .. "', deps={}, archive={strip=1} }\n")
   lib.run_zeta({ "-ReProvide", "upgradable", "--pass" }, e)
-  local code, out = lib.run_zeta({ "-Elevate", "--pass" }, e)
+  local code, out = lib.run_zeta({ "-Transcend", "--pass" }, e)
   lib.assert_eq(code, 0, out)
   lib.assert_contains(out, "all packages are up to date")
 end)
 
-suite:test("-Elevate with no packages installed does nothing", function()
+suite:test("-Transcend with no packages installed does nothing", function()
   local e = fresh_env()
-  local code, out = lib.run_zeta({ "-Elevate", "--pass" }, e)
+  local code, out = lib.run_zeta({ "-Transcend", "--pass" }, e)
   lib.assert_eq(code, 0, out)
   lib.assert_contains(out, "no packages installed")
 end)
