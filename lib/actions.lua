@@ -37,6 +37,7 @@ Commands:
   -List                   List installed packages and dependencies
   -Localize <query>       Search the remote repository index for <query>
   -Test <pkg>             Verify <pkg> offline WITHOUT installing it
+  -Forget                 Remove all cached packages
   -Help                   Show this help
 
 Flags:
@@ -809,6 +810,17 @@ function actions.transcend(flags)
 			return 1
 		end
 	end
+	return 0
+end
+
+function actions.forget(pass)
+	local cfg = config.get()
+	if not confirm("Remove all cached packages?", pass, " [y/N]", true) then
+		log.info("aborted by user")
+		return 0
+	end
+	path.run("rm -rf " .. path.quote(cfg.cache_dir) .. "/*")
+	log.info("cache has been cleared")
 	return 0
 end
 

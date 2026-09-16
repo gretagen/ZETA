@@ -20,6 +20,7 @@ local COMMANDS = {
   list = true,
   localize = true,
   test = true,
+  forget = true,
   help = true,
 }
 
@@ -29,6 +30,7 @@ local ARITY = {
   test = 1,
   list = 0,
   transcend = 0,
+  forget = 0,
   help = 0,
 }
 
