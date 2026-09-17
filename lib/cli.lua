@@ -47,7 +47,7 @@ local MIN_ARGS = {
 function cli.parse(args)
   local cmd
   local pos = {}
-  local flags = { pass = false, force = false, with_deps = false, detail = false, silence = false }
+  local flags = { pass = false, force = false, with_deps = false, detail = false, silence = false, no_quote = false }
 
   for _, a in ipairs(args) do
     if a:match("^%-%-") then
@@ -66,6 +66,8 @@ function cli.parse(args)
         -- bin/zeta, installed launchers) honors --silence without needing the
         -- entry script itself to call log.set_file_silent().
         log.set_file_silent(true)
+      elseif key == "no-quote" then
+        flags.no_quote = true
       elseif key == "help" then
         cmd = "help"
       elseif key == "dir" then
