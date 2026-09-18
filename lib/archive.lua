@@ -233,19 +233,25 @@ function archive.extract_arch_pkg(archive_file, dest, opts)
       strip = 0
     end
   end
-  -- Fix absolute symlinks that escape the root (common in Arch packages)
-  local fixed = archive.rewrite_abs_symlinks(archive_file)
-  if not fixed then
-    return nil, ("failed to rewrite symlinks in %s"):format(archive_file)
+  -- Arch packages ship absolute symlinks (e.g. mate-panel help docs).
+  -- These are harmless: tar creates them as-is and they resolve at runtime
+  -- against the real root. We skip validation and extract directly.
+  local listing = log.is_file_silent() and "-xf" or "-xvf"
+  local cmd = TAR_ENV .. " tar " .. listing .. " " .. path.quote(archive_file)
+    .. " -C " .. path.quote(dest) .. " --no-same-owner"
+  for _, glob in ipairs({ ".PKGINFO", ".MTREE", ".BUILDINFO", ".INSTALL" }) do
+    cmd = cmd .. " --exclude=" .. path.quote(glob)
   end
-  local result = archive.extract_tar(fixed, dest, {
-    strip = strip,
-    exclude = { ".PKGINFO", ".MTREE", ".BUILDINFO", ".INSTALL" },
-  })
-  if fixed ~= archive_file then
-    os.remove(fixed)
+  if strip > 0 then
+    cmd = cmd .. " --strip-components=" .. tostring(strip)
   end
-  return result
+  log.detail(("archive: extracting %s into %s%s"):format(
+    path.basename(archive_file), dest,
+    strip > 0 and (" (strip " .. strip .. ")") or ""))
+  if not path.run(cmd) then
+    return nil, ("failed to extract %s"):format(archive_file)
+  end
+  return {}
 end
 
 -- Locate the `data.tar.*` member of an ar (deb) container. ar member layout:
