@@ -90,6 +90,30 @@ end
 -- These escape the extraction root. This function repacks the tar with
 -- symlink targets rewritten to relative form. Returns the path to the
 -- fixed tar (caller must clean it up), or nil on failure.
+local function relative_path(from_file, to_abs)
+  -- from_file: path of the symlink (e.g. "usr/share/help/af/mate-clock/figures/clock_applet.png")
+  -- to_abs: absolute target (e.g. "/usr/share/help/C/mate-clock/figures/clock_applet.png")
+  -- Compute relative path from from_file's directory to to_abs.
+  local from_dir = from_file:match("^(.*)/[^/]+$") or ""
+  -- Split dirs
+  local from_parts = {}
+  for p in from_dir:gmatch("[^/]+") do from_parts[#from_parts + 1] = p end
+  local to_parts = {}
+  for p in to_abs:gmatch("[^/]+") do to_parts[#to_parts + 1] = p end
+  -- Find common prefix
+  local common = 0
+  for i = 1, math.min(#from_parts, #to_parts) do
+    if from_parts[i] == to_parts[i] then common = i else break end
+  end
+  -- Go up from from_dir, then down to target
+  local ups = #from_parts - common
+  local parts = {}
+  for i = 1, ups do parts[#parts + 1] = ".." end
+  for i = common + 1, #to_parts do parts[#parts + 1] = to_parts[i] end
+  if #parts == 0 then return "." end
+  return table.concat(parts, "/")
+end
+
 function archive.rewrite_abs_symlinks(archive_file)
   local entries, err = archive.entries(archive_file)
   if not entries then return nil, err end
@@ -101,24 +125,24 @@ function archive.rewrite_abs_symlinks(archive_file)
     end
   end
   if not has_abs then return archive_file end
-  -- Build a sed script that rewrites symlink lines in tar -tvf output
-  -- Then re-archieve. Simpler: extract to temp, fix symlinks, re-tar.
+  -- Extract to temp, fix symlinks via entries list, re-tar
   local tmp = os.tmpname()
+  os.remove(tmp)
   os.execute("mkdir -p " .. tmp)
   local cmd = TAR_ENV .. " tar -xf " .. path.quote(archive_file)
     .. " -C " .. path.quote(tmp) .. " --no-same-owner"
   path.run(cmd)
-  -- Fix absolute symlinks
-  local fix_cmd = "find " .. path.quote(tmp) .. " -type l -exec sh -c '"
-    .. "target=$(readlink \"$1\"); "
-    .. "case \"$target\" in /*) "
-    .. "  dir=$(dirname \"$1\"); "
-    .. "  rel=\"$(realpath --relative-to=\"$dir\" \"$target\" 2>/dev/null || echo \"$target\")\"; "
-    .. "  ln -sfn \"$rel\" \"$1\";"
-    .. ";; esac' _ {} \\;"
-  os.execute(fix_cmd)
+  -- Fix each absolute symlink
+  for _, e in ipairs(entries) do
+    if e.type == "symlink" and e.target and e.target:match("^/") then
+      local full = tmp .. "/" .. e.path
+      local rel = relative_path(e.path, e.target)
+      os.execute("ln -sfn " .. path.quote(rel) .. " " .. path.quote(full))
+    end
+  end
   -- Re-tar
   local fixed = os.tmpname() .. ".tar"
+  os.remove(fixed)
   local rcmd = "tar cf " .. path.quote(fixed) .. " -C " .. path.quote(tmp) .. " ."
   path.run(rcmd)
   os.execute("rm -rf " .. path.quote(tmp))
