@@ -84,6 +84,47 @@ function archive.entries(archive_file)
   return entries
 end
 
+-- Rewrite a tar archive to convert absolute symlinks to relative ones.
+-- Arch packages (especially mate-panel) ship help-doc symlinks like:
+--   usr/share/help/af/mate-clock/figures/clock_applet.png -> /usr/share/help/C/...
+-- These escape the extraction root. This function repacks the tar with
+-- symlink targets rewritten to relative form. Returns the path to the
+-- fixed tar (caller must clean it up), or nil on failure.
+function archive.rewrite_abs_symlinks(archive_file)
+  local entries, err = archive.entries(archive_file)
+  if not entries then return nil, err end
+  local has_abs = false
+  for _, e in ipairs(entries) do
+    if e.type == "symlink" and e.target and e.target:match("^/") then
+      has_abs = true
+      break
+    end
+  end
+  if not has_abs then return archive_file end
+  -- Build a sed script that rewrites symlink lines in tar -tvf output
+  -- Then re-archieve. Simpler: extract to temp, fix symlinks, re-tar.
+  local tmp = os.tmpname()
+  os.execute("mkdir -p " .. tmp)
+  local cmd = TAR_ENV .. " tar -xf " .. path.quote(archive_file)
+    .. " -C " .. path.quote(tmp) .. " --no-same-owner"
+  path.run(cmd)
+  -- Fix absolute symlinks
+  local fix_cmd = "find " .. path.quote(tmp) .. " -type l -exec sh -c '"
+    .. "target=$(readlink \"$1\"); "
+    .. "case \"$target\" in /*) "
+    .. "  dir=$(dirname \"$1\"); "
+    .. "  rel=\"$(realpath --relative-to=\"$dir\" \"$target\" 2>/dev/null || echo \"$target\")\"; "
+    .. "  ln -sfn \"$rel\" \"$1\";"
+    .. ";; esac' _ {} \\;"
+  os.execute(fix_cmd)
+  -- Re-tar
+  local fixed = os.tmpname() .. ".tar"
+  local rcmd = "tar cf " .. path.quote(fixed) .. " -C " .. path.quote(tmp) .. " ."
+  path.run(rcmd)
+  os.execute("rm -rf " .. path.quote(tmp))
+  return fixed
+end
+
 -- Validate that no member escapes the extraction root. Returns true or nil, err.
 function archive.validate(entries)
   for _, e in ipairs(entries) do
@@ -168,10 +209,19 @@ function archive.extract_arch_pkg(archive_file, dest, opts)
       strip = 0
     end
   end
-  return archive.extract_tar(archive_file, dest, {
+  -- Fix absolute symlinks that escape the root (common in Arch packages)
+  local fixed = archive.rewrite_abs_symlinks(archive_file)
+  if not fixed then
+    return nil, ("failed to rewrite symlinks in %s"):format(archive_file)
+  end
+  local result = archive.extract_tar(fixed, dest, {
     strip = strip,
     exclude = { ".PKGINFO", ".MTREE", ".BUILDINFO", ".INSTALL" },
   })
+  if fixed ~= archive_file then
+    os.remove(fixed)
+  end
+  return result
 end
 
 -- Locate the `data.tar.*` member of an ar (deb) container. ar member layout:
