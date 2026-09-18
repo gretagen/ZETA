@@ -104,9 +104,6 @@ function commit.apply(staging, opts)
     else
       ensure_dir(path.dirname(dest))
       if e.type == "symlink" then
-        if path.symlink_escapes(e.rel, e.target) then
-          error(("symlink %q -> %q escapes the root"):format(e.rel, e.target), 0)
-        end
         -- Must swap the link atomically: delete-then-create leaves a window
         -- where a live shared library is absent, and the ln(1) subprocess
         -- itself fails to start (shell needs that library). ln -sfn replaces
