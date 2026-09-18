@@ -122,11 +122,11 @@ local quotes = {
   },
 
   reprovide = {
-    "If you can't update, considering clearing cache instead of reproviding.",
+    "If you can't update, consider clearing cache instead of reproviding.",
     "Network disconnected I suppose?",
     "Package failed to install I suppose",
     "Shared library not found I suppose?",
-    "Remember to report any bugs on the github!"
+    "Remember to report any bugs on the github!",
   },
 
 }

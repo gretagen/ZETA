@@ -49,7 +49,8 @@ Flags:
                           installed explicitly)
   --detail                With -Remove, list every file that would be deleted
   --silence               Suppress per-file 'provided' output and tar extraction
-                          listings (faster on slow terminals)
+                           listings (faster on slow terminals)
+  --no-quote              Disable random startup quotes
 
 Configuration:
   /etc/zeta/configuration.lua   System-wide configuration (Lua table)
@@ -60,6 +61,7 @@ Configuration:
       repo = "https://github.com/gretagen/zeta-packages",
       root = "/",
       verbose = false,
+      quotes = false,
     }
 
 Installed state is tracked in two registries under /var/db/zeta:

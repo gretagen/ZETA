@@ -84,6 +84,10 @@ function config.load(script_dir)
     verbose = (getenv("ZETA_VERBOSE") == "1" or getenv("ZETA_VERBOSE") == "true")
               or (cfg_file and cfg_file.verbose == true)
               or false,
+    quotes = not (
+      (getenv("ZETA_QUOTES") == "false" or getenv("ZETA_QUOTES") == "0")
+      or (cfg_file and cfg_file.quotes == false)
+    ),
   }
   return _cfg
 end
