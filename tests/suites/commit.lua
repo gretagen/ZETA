@@ -52,8 +52,8 @@ suite:test("commits files, symlinks, and dirs", function()
   for _, e in ipairs(owned) do found[e.rel] = true end
   lib.assert_true(found["usr/bin/tool"])
   lib.assert_true(found["usr/lib/liba.so.1"])
-  lib.assert_true(found["usr/bin"], "directories must be recorded as owned")
-  lib.assert_true(found["usr/lib"], "directories must be recorded as owned")
+  lib.assert_false(found["usr/bin"], "parent directories must NOT be recorded as owned")
+  lib.assert_false(found["usr/lib"], "parent directories must NOT be recorded as owned")
 end)
 
 suite:test("init-system and distro-identity paths are installed normally", function()

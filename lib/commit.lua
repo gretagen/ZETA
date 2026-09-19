@@ -56,9 +56,37 @@ function commit.apply(staging, opts)
 
   local root = config.get().root
 
-  -- Owned entries are all concrete paths a package ships. Directories are
-  -- recorded so removal can prune them once empty.
-  local owned = entries
+  -- Owned entries are all concrete paths a package ships. Filter out directory
+  -- entries that are prefixes of other entries: if a package owns usr/bin/hello,
+  -- we don't record usr/ or usr/bin/ -- delete_files collects parents dynamically.
+  -- This prevents removal from ever attempting to rmdir system directories.
+  local non_dir = {}
+  local dir_set = {}
+  for _, e in ipairs(entries) do
+    if e.type == "dir" then
+      dir_set[e.rel] = true
+    else
+      non_dir[#non_dir + 1] = e
+    end
+  end
+  -- Keep only directories that are NOT prefixes of any file/symlink entry.
+  local owned = {}
+  for _, e in ipairs(entries) do
+    if e.type ~= "dir" then
+      owned[#owned + 1] = e
+    else
+      local dominated = false
+      for _, nd in ipairs(non_dir) do
+        if nd.rel:sub(1, #e.rel + 1) == e.rel .. "/" then
+          dominated = true
+          break
+        end
+      end
+      if not dominated then
+        owned[#owned + 1] = e
+      end
+    end
+  end
 
   -- Commit non-symlinks before symlinks: a library symlink (libfoo.so.1 ->
   -- libfoo.so.1.2.3) must never point at a file that has not been installed

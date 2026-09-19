@@ -490,9 +490,22 @@ function actions.test(name, flags)
 	return 0
 end
 
--- Unlink the owned files of an entry, skipping unsafe paths and shared
--- files, then prune now-empty parents. `pkg_name` is used to check
--- other owners.
+-- System directories that must never be removed. This is a safety net: even
+-- if a package's file list contains these paths (due to legacy record-keeping),
+-- delete_files will refuse to unlink or rmdir them.
+local PROTECTED_DIRS = {}
+for _, d in ipairs({
+  "/", "/bin", "/sbin", "/boot",
+  "/usr", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64", "/usr/share",
+  "/etc", "/var", "/tmp", "/opt",
+  "/dev", "/proc", "/sys", "/run",
+  "/home", "/root",
+}) do
+  PROTECTED_DIRS[d] = true
+end
+
+-- Unlink the owned files of an entry, skipping unsafe paths, protected
+-- directories, and shared files, then prune now-empty parents.
 local function delete_files(files, pkg_name)
   local root = config.get().root
   local dirs = {}
@@ -501,18 +514,24 @@ local function delete_files(files, pkg_name)
     if rel == "" or rel == "." or rel:match("^/") or rel:match("^%.%.")
        or rel:match("%.%.%/") then
       log.warn(("  skipping unsafe path %q"):format(rel))
-    elseif #db.other_owners(pkg_name, rel) > 0 then
-      log.detail(("  skipping %s (shared with %s)"):format(rel,
-        table.concat(db.other_owners(pkg_name, rel), ", ")))
     else
       local p = path.join(root, rel)
-      os.remove(p)
-      log.detail(("  removed %s"):format(rel))
-      local d = path.dirname(p)
-      while d ~= "/" and d ~= "." and not seen[d] do
-        seen[d] = true
-        dirs[#dirs + 1] = d
-        d = path.dirname(d)
+      if PROTECTED_DIRS[p] then
+        log.detail(("  skipping protected directory %s"):format(rel))
+      elseif #db.other_owners(pkg_name, rel) > 0 then
+        log.detail(("  skipping %s (shared with %s)"):format(rel,
+          table.concat(db.other_owners(pkg_name, rel), ", ")))
+      else
+        os.remove(p)
+        log.detail(("  removed %s"):format(rel))
+        local d = path.dirname(p)
+        while d ~= "/" and d ~= "." and not seen[d] do
+          seen[d] = true
+          if not PROTECTED_DIRS[d] then
+            dirs[#dirs + 1] = d
+          end
+          d = path.dirname(d)
+        end
       end
     end
   end
