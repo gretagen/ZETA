@@ -143,10 +143,8 @@ function commit.apply(staging, opts)
     end
   end
 
-  -- Flush all buffered messages at once.
-  for _, msg in ipairs(messages) do
-    log.detail(msg)
-  end
+  -- Flush all buffered messages in one print() call for instant output.
+  log.detail_batch(messages)
 
   log.ok(("committed %d file(s) to %s"):format(#owned, root))
 

@@ -85,6 +85,16 @@ function log.detail(msg)
   print(paint("dim", " .   " .. msg))
 end
 
+-- Print multiple detail messages in a single print() call for instant output.
+function log.detail_batch(msgs)
+  if quiet or #msgs == 0 then return end
+  local buf = {}
+  for _, msg in ipairs(msgs) do
+    buf[#buf + 1] = " .   " .. msg
+  end
+  print(paint("dim", table.concat(buf, "\n")))
+end
+
 -- Always print, even under --silence. Used for the startup banner so the user
 -- always sees where Zeta will operate regardless of output suppression.
 function log.banner(msg)
