@@ -58,7 +58,7 @@ Configuration:
 
   Example /etc/zeta/configuration.lua:
     return {
-      repo = "https://github.com/gretagen/zeta-packages",
+      repo = "https://github.com/gretagen/zeta-index",
       root = "/",
       verbose = false,
       quotes = false,
@@ -70,7 +70,7 @@ Installed state is tracked in two registries under /var/db/zeta:
 
 Environment:
   ZETA_ROOT            Filesystem root packages are installed into   (default: /)
-  ZETA_REPO            Remote repository base URL (github.com served via    (default: https://github.com/gretagen/zeta-packages)
+  ZETA_REPO            Remote repository base URL (github.com served via    (default: https://github.com/gretagen/zeta-index)
                        raw.githubusercontent.com)
   ZETA_LOCAL_PACKAGES  Local /packages tree                          (default: /usr/share/packages)
   ZETA_CACHE           Download cache                                (default: $ZETA_ROOT/var/cache/zeta)

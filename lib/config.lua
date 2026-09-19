@@ -76,7 +76,7 @@ function config.load(script_dir)
   -- Layer 3: Build full config table with env > file > defaults.
   _cfg = {
     root = root,
-    repo = getenv("ZETA_REPO") or (cfg_file and cfg_file.repo) or "https://github.com/gretagen/zeta-packages",
+    repo = getenv("ZETA_REPO") or (cfg_file and cfg_file.repo) or "https://github.com/gretagen/zeta-index",
     local_packages = resolve_local_packages(root, under, cfg_file),
     cache_dir = getenv("ZETA_CACHE") or (cfg_file and cfg_file.cache_dir) or under("var/cache/zeta"),
     state_dir = getenv("ZETA_STATE") or (cfg_file and cfg_file.state_dir) or under("var/db/zeta"),

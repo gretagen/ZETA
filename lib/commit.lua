@@ -88,43 +88,41 @@ function commit.apply(staging, opts)
     end
   end
 
-  -- Copy phase.
+  -- Copy phase. Buffer all "provided" messages and print them at the end
+  -- for instant output instead of one-by-one terminal redraws.
+  local messages = {}
+  local silent = log.is_file_silent()
+  local verbose = config.get().verbose
+
   for _, e in ipairs(owned) do
     local dest = path.join(root, e.rel)
     local src = path.join(staging, e.rel)
     if e.type == "dir" then
       ensure_dir(dest)
-      if not log.is_file_silent() then
-        if config.get().verbose then
-          log.detail(("  mkdir %s"):format(dest))
+      if not silent then
+        if verbose then
+          messages[#messages + 1] = ("  mkdir %s"):format(dest)
         else
-          log.detail(("provided directory %s"):format(e.rel))
+          messages[#messages + 1] = ("provided directory %s"):format(e.rel)
         end
       end
     else
       ensure_dir(path.dirname(dest))
       if e.type == "symlink" then
-        -- Must swap the link atomically: delete-then-create leaves a window
-        -- where a live shared library is absent, and the ln(1) subprocess
-        -- itself fails to start (shell needs that library). ln -sfn replaces
-        -- the link in one step so it is never observed missing.
         if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(dest)) then
           error(("failed to create symlink %q"):format(dest), 0)
         end
-        if not log.is_file_silent() then
-          if config.get().verbose then
-            log.detail(("  link %s -> %s"):format(dest, e.target))
+        if not silent then
+          if verbose then
+            messages[#messages + 1] = ("  link %s -> %s"):format(dest, e.target)
           else
-            log.detail(("provided symlink %s -> %s"):format(e.rel, e.target))
+            messages[#messages + 1] = ("provided symlink %s -> %s"):format(e.rel, e.target)
           end
         end
       else
-        if path.exists(dest) and not log.is_file_silent() then
-          log.detail(("overwriting existing %s"):format(e.rel))
+        if path.exists(dest) and not silent then
+          messages[#messages + 1] = ("overwriting existing %s"):format(e.rel)
         end
-        -- Copy to a temp name then rename(): overwriting a running executable
-        -- in place fails with ETXTBSY, and a half-copied file is never visible
-        -- to other processes. rename() is atomic on the same filesystem.
         local tmp = dest .. ".zeta-tmp-" .. tostring(math.random(100000, 999999))
         if not path.run("cp -a " .. path.quote(src) .. " " .. path.quote(tmp)) then
           os.remove(tmp)
@@ -134,15 +132,20 @@ function commit.apply(staging, opts)
           os.remove(tmp)
           error(("failed to install %q"):format(e.rel), 0)
         end
-        if not log.is_file_silent() then
-          if config.get().verbose then
-            log.detail(("  install %s -> %s"):format(src, dest))
+        if not silent then
+          if verbose then
+            messages[#messages + 1] = ("  install %s -> %s"):format(src, dest)
           else
-            log.detail(("provided %s"):format(e.rel))
+            messages[#messages + 1] = ("provided %s"):format(e.rel)
           end
         end
       end
     end
+  end
+
+  -- Flush all buffered messages at once.
+  for _, msg in ipairs(messages) do
+    log.detail(msg)
   end
 
   log.ok(("committed %d file(s) to %s"):format(#owned, root))

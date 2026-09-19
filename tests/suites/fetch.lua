@@ -8,14 +8,14 @@ local suite = lib.new_suite("fetch")
 
 suite:test("github.com manifest url is rewritten to raw", function()
   lib.assert_eq(
-    fetch.raw_github("https://github.com/gretagen/zeta-packages/packages/hello/package.lua"),
-    "https://raw.githubusercontent.com/gretagen/zeta-packages/refs/heads/main/packages/hello/package.lua")
+    fetch.raw_github("https://github.com/gretagen/zeta-index/packages/hello/package.lua"),
+    "https://raw.githubusercontent.com/gretagen/zeta-index/refs/heads/main/packages/hello/package.lua")
 end)
 
 suite:test("github.com repo root is rewritten too", function()
   lib.assert_eq(
-    fetch.raw_github("https://github.com/gretagen/zeta-packages"),
-    "https://raw.githubusercontent.com/gretagen/zeta-packages/refs/heads/main")
+    fetch.raw_github("https://github.com/gretagen/zeta-index"),
+    "https://raw.githubusercontent.com/gretagen/zeta-index/refs/heads/main")
 end)
 
 suite:test("http and www github.com variants are rewritten", function()
