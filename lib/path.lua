@@ -103,12 +103,11 @@ function path.relative_inside(p)
 end
 
 -- True if a symlink located at `rel` whose target is `target` would escape
--- the installation root. Absolute targets always escape (Zeta relocates
--- staging trees into ZETA_ROOT, which may not be "/"), and relative targets
--- are resolved against the symlink's directory.
+-- the installation root. Absolute targets are allowed — they resolve at
+-- runtime against the real root. Relative targets are checked for ".."
+-- traversal that would climb above the root.
 function path.symlink_escapes(rel, target)
   if not target or target == "" then return false end
-  if target:match("^/") then return true end
   local dir = rel:match("^(.*)/[^/]+$") or ""
   local combined = dir .. "/" .. target
   return not path.relative_inside(combined)

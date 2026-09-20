@@ -11,6 +11,7 @@ local commit = {}
 local path = require("path")
 local config = require("config")
 local log = require("log")
+local spinner = require("spinner")
 
 -- Walk a staged tree: returns entries { { rel, type, target } } where type is
 -- "file", "dir" or "symlink". Uses find -printf ('%y|%l|%P') which gives
@@ -116,41 +117,29 @@ function commit.apply(staging, opts)
     end
   end
 
-  -- Copy phase. Buffer all "provided" messages and print them at the end
-  -- for instant output instead of one-by-one terminal redraws.
-  local messages = {}
-  local silent = log.is_file_silent()
+  -- Copy phase. Non-verbose TTY mode shows a live updating progress line
+  -- that overwrites itself in place. Verbose mode shows detailed per-file
+  -- messages. Non-TTY mode skips per-file output entirely.
   local verbose = config.get().verbose
+  local use_tty = spinner.enabled()
+  local total = #owned
+  local done = 0
+  local file_count, sym_count, dir_count = 0, 0, 0
 
   for _, e in ipairs(owned) do
     local dest = path.join(root, e.rel)
     local src = path.join(staging, e.rel)
     if e.type == "dir" then
       ensure_dir(dest)
-      if not silent then
-        if verbose then
-          messages[#messages + 1] = ("  mkdir %s"):format(dest)
-        else
-          messages[#messages + 1] = ("provided directory %s"):format(e.rel)
-        end
-      end
+      dir_count = dir_count + 1
     else
       ensure_dir(path.dirname(dest))
       if e.type == "symlink" then
         if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(dest)) then
           error(("failed to create symlink %q"):format(dest), 0)
         end
-        if not silent then
-          if verbose then
-            messages[#messages + 1] = ("  link %s -> %s"):format(dest, e.target)
-          else
-            messages[#messages + 1] = ("provided symlink %s -> %s"):format(e.rel, e.target)
-          end
-        end
+        sym_count = sym_count + 1
       else
-        if path.exists(dest) and not silent then
-          messages[#messages + 1] = ("overwriting existing %s"):format(e.rel)
-        end
         local tmp = dest .. ".zeta-tmp-" .. tostring(math.random(100000, 999999))
         if not path.run("cp -a " .. path.quote(src) .. " " .. path.quote(tmp)) then
           os.remove(tmp)
@@ -160,21 +149,45 @@ function commit.apply(staging, opts)
           os.remove(tmp)
           error(("failed to install %q"):format(e.rel), 0)
         end
-        if not silent then
-          if verbose then
-            messages[#messages + 1] = ("  install %s -> %s"):format(src, dest)
-          else
-            messages[#messages + 1] = ("provided %s"):format(e.rel)
-          end
-        end
+        file_count = file_count + 1
+      end
+    end
+
+    -- Live progress line (TTY only, non-verbose).
+    if use_tty and not verbose then
+      done = done + 1
+      io.write(("\r\27[K  [ provided %d | %d entries ] %s"):format(done, total, e.rel))
+      io.flush()
+    end
+
+    -- Verbose: detailed per-file output.
+    if verbose then
+      if e.type == "dir" then
+        log.detail(("  mkdir %s"):format(dest))
+      elseif e.type == "symlink" then
+        log.detail(("  link %s -> %s"):format(dest, e.target))
+      else
+        log.detail(("  install %s -> %s"):format(src, dest))
       end
     end
   end
 
-  -- Flush all buffered messages in one print() call for instant output.
-  log.detail_batch(messages)
+  -- Clear the progress line.
+  if use_tty and not verbose then
+    io.write("\r\27[K")
+    io.flush()
+  end
 
-  log.ok(("committed %d file(s) to %s"):format(#owned, root))
+  -- Per-type summary.
+  if file_count > 0 then
+    log.info(("- committed %d files to %s"):format(file_count, root))
+  end
+  if sym_count > 0 then
+    log.info(("- committed %d symlinks to %s"):format(sym_count, root))
+  end
+  if dir_count > 0 then
+    log.info(("- committed %d dirs to %s"):format(dir_count, root))
+  end
 
   -- Auto-compile GSettings schemas if any were installed.
   local schemas_dir = root .. "/usr/share/glib-2.0/schemas"
