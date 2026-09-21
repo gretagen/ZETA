@@ -13,6 +13,27 @@ local config = require("config")
 local log = require("log")
 local spinner = require("spinner")
 
+-- ANSI color support for the progress line.
+local function wants_color()
+  local t = os.getenv("TERM")
+  if not t or t == "" or t == "dumb" then return false end
+  if os.getenv("NO_COLOR") then return false end
+  return true
+end
+local COLOR = wants_color()
+local C = {
+  reset  = "\27[0m",
+  blue   = "\27[34m",
+  green  = "\27[32m",
+  red    = "\27[31m",
+  cyan   = "\27[36m",
+  dim    = "\27[2m",
+}
+local function paint(color, s)
+  if not COLOR then return s end
+  return C[color] .. s .. C.reset
+end
+
 -- Walk a staged tree: returns entries { { rel, type, target } } where type is
 -- "file", "dir" or "symlink". Uses find -printf ('%y|%l|%P') which gives
 -- type, symlink target, and root-relative path on a single line.
@@ -153,10 +174,13 @@ function commit.apply(staging, opts)
       end
     end
 
-    -- Live progress line (TTY only, non-verbose).
-    if use_tty and not verbose then
+    -- Live progress line (TTY only, non-verbose, non-meta-package).
+    if use_tty and not verbose and total > 0 then
       done = done + 1
-      io.write(("\r\27[K  [ provided %d | %d entries ] %s"):format(done, total, e.rel))
+      local n = paint("blue", tostring(done))
+      local tot = paint("cyan", tostring(total))
+      local p = paint("dim", e.rel)
+      io.write(("\r\27[K  [ provided %s | %s entries ] %s"):format(n, tot, p))
       io.flush()
     end
 
@@ -172,9 +196,11 @@ function commit.apply(staging, opts)
     end
   end
 
-  -- Clear the progress line.
-  if use_tty and not verbose then
-    io.write("\r\27[K")
+  -- Clear the progress line and show final count in green.
+  if use_tty and not verbose and total > 0 then
+    local n = paint("green", tostring(total))
+    local tot = paint("cyan", tostring(total))
+    io.write(("\r\27[K  [ provided %s | %s entries ]\n"):format(n, tot))
     io.flush()
   end
 
@@ -187,6 +213,28 @@ function commit.apply(staging, opts)
   end
   if dir_count > 0 then
     log.info(("- committed %d dirs to %s"):format(dir_count, root))
+  end
+
+  -- Ensure the dynamic linker knows about /usr/lib and /lib. The default
+  -- ld.so.conf only lists /usr/local/lib and /opt/lib; without these paths
+  -- ldconfig cannot populate the cache for libraries installed by ZETA.
+  local ldconf = path.join(root, "etc/ld.so.conf.d/00-usr.conf")
+  if not path.exists(ldconf) then
+    path.mkdir_p(path.dirname(ldconf))
+    local f = io.open(ldconf, "w")
+    if f then
+      f:write("/lib\n/usr/lib\n")
+      f:close()
+    end
+  end
+
+  -- Rebuild the shared library cache so newly installed libraries are found
+  -- at runtime. ldconfig is idempotent and fast.
+  log.step("Regenerating ldconfig cache")
+  if path.run("ldconfig") then
+    log.ok("ld.so.cache updated")
+  else
+    log.warn("ldconfig failed (non-fatal, but libraries may not be found at runtime)")
   end
 
   -- Auto-compile GSettings schemas if any were installed.
