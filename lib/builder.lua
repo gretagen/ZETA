@@ -271,6 +271,17 @@ function builder.fetch_payload(manifest, opts)
   local dest = path.join(config.get().cache_dir,
     manifest.name .. "-" .. manifest.version .. "." .. cache_suffix(url))
   if path.exists(dest) then
+    -- A cached payload is only reusable while it matches the manifest sha256.
+    -- Constructs are occasionally rebuilt in place (same name, same version,
+    -- new contents), so a stale entry must be discarded and fetched again
+    -- instead of surfacing a checksum failure at install time.
+    if manifest.sha256 then
+      local vok = checksum.verify(dest, manifest.sha256)
+      if not vok then
+        os.remove(dest)
+        return { url = resolved, dest = dest }
+      end
+    end
     return { cached = dest }
   end
   return { url = resolved, dest = dest }

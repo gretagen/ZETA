@@ -93,6 +93,13 @@ repo_write("evil/package.lua",
 repo_write("badsha/package.lua",
   "return { name='badsha', version='1.0', url='" .. file_url(path.join(PKG, "hello", "hello-1.0.tar.gz"))
     .. "', sha256='" .. string.rep("0", 64) .. "', deps={}, archive={strip=1} }\n")
+-- repacked: same name, version, and URL whose payload gets rebuilt (new sha)
+-- mid-test. Simulates an in-place construct repack, e.g. iproute2 dropping
+-- arpd: the freshly served tarball must invalidate the download cache.
+local rep_tar, rep_sha = make_payload("repacked", { ["usr/bin/repacked"] = "#!/bin/sh\necho v1\n" })
+repo_write("repacked/package.lua",
+  "return { name='repacked', version='1.0', url='" .. file_url(rep_tar) .. "', sha256='"
+    .. rep_sha .. "', deps={}, archive={strip=1} }\n")
 repo_write("index.lua",
   "return { {name='hello',version='1.0',summary='demo'}, {name='libz',version='1.3.1',summary='lib'}, "
     .. "{name='app',version='1.0',summary='needs hello'}, {name='app2',version='1.0',summary='needs app'}, "
@@ -126,7 +133,8 @@ repo_write("index.lua",
     .. "{name='app3',version='1.0',summary='needs hello'}, {name='evil',version='1.0'}, {name='badsha',version='1.0'}, "
     .. "{name='upgradable',version='2.0',summary='upgrade test'}, "
     .. "{name='shared1',version='1.0',summary='shared file test'}, "
-    .. "{name='shared2',version='1.0',summary='shared file test 2'} }\n")
+    .. "{name='shared2',version='1.0',summary='shared file test 2'}, "
+    .. "{name='repacked',version='1.0',summary='in-place repack test'} }\n")
 
 -- ---------------------------------------------------------------------------
 -- Runner helpers
@@ -421,6 +429,25 @@ suite:test("checksum mismatch aborts the install", function()
   local code, out = lib.run_zeta({ "-Provide", "badsha", "--pass" }, fresh_env())
   lib.assert_eq(code, 1)
   lib.assert_contains(out, "sha256 mismatch")
+end)
+
+suite:test("a repackaged construct (same name/version, new sha) refreshes the cached payload", function()
+  local e = fresh_env()
+  local code, out = lib.run_zeta({ "-Provide", "repacked", "--pass" }, e)
+  lib.assert_eq(code, 0, out)
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/repacked")))
+
+  -- Rebuild the payload in place: same URL, new contents (new sha256), like a
+  -- construct repack. The v1 payload must not be reused from the cache.
+  local _, new_sha = make_payload("repacked", { ["usr/bin/repacked"] = "#!/bin/sh\necho v2\n" })
+  lib.assert_true(new_sha ~= rep_sha)
+  repo_write("repacked/package.lua",
+    "return { name='repacked', version='1.0', url='" .. file_url(rep_tar) .. "', sha256='"
+      .. new_sha .. "', deps={}, archive={strip=1} }\n")
+
+  local code2, out2 = lib.run_zeta({ "-ReProvide", "repacked", "--pass" }, e)
+  lib.assert_eq(code2, 0, out2)
+  lib.assert_eq(lib.read(path.join(e.ZETA_ROOT, "usr/bin/repacked")), "#!/bin/sh\necho v2\n")
 end)
 
 suite:test("init-system paths are installed normally", function()
