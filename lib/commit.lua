@@ -156,6 +156,13 @@ function commit.apply(staging, opts)
     else
       ensure_dir(path.dirname(dest))
       if e.type == "symlink" then
+        -- uutils-coreutils ln (0.13, the GNU coreutils replacement) cannot
+        -- `-f`-replace an existing destination whose parent is a symlinked
+        -- directory: it reports ENOTDIR from the parent resolution instead of
+        -- unlinking (e.g. replacing a plain file with `ctstat -> lnstat` under
+        -- /sbin -> usr/sbin). Remove the old entry explicitly first so ln only
+        -- ever creates a fresh link; harmless with GNU ln too.
+        path.run("rm -f " .. path.quote(dest))
         if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(dest)) then
           error(("failed to create symlink %q"):format(dest), 0)
         end

@@ -127,6 +127,29 @@ suite:test("files behind a dangling usr-merge symlink commit", function()
   lib.assert_true(found["sbin/ldconfig"])
 end)
 
+suite:test("symlinks overwrite an existing file behind a usr-merge symlink", function()
+  local root = fresh()
+  -- usr-merge layout like the filesystem package: /sbin -> usr/sbin
+  os.execute("mkdir -p " .. path.quote(root .. "/usr/sbin"))
+  os.execute("ln -s usr/sbin " .. path.quote(root .. "/sbin"))
+  -- A file already occupies the destination (e.g. a hand-placed binary).
+  lib.write(path.join(root, "usr/sbin/ctstat"), "orphan-binary")
+
+  local s = path.join(root, "stage")
+  os.execute("mkdir -p " .. path.quote(s .. "/sbin"))
+  lib.write(path.join(s, "sbin/lnstat"), "ELF-stub")
+  os.execute("ln -s lnstat " .. path.quote(s .. "/sbin/ctstat"))
+
+  local owned = commit.apply(s, { pkg_name = "iproute2" })
+  lib.assert_true(lib.is_symlink(path.join(root, "usr/sbin/ctstat")),
+    "existing file must be replaced by the packaged symlink")
+  lib.assert_eq(path.readlink(path.join(root, "usr/sbin/ctstat")), "lnstat")
+  lib.assert_true(lib.exists(path.join(root, "usr/sbin/lnstat")))
+  -- Regexp tied to: uutils-coreutils ln 0.13 cannot -f-replace an existing
+  -- destination under a symlinked parent (ENOTDIR instead of unlinking), so
+  -- commit removes the old entry before linking.
+end)
+
 suite:test("library symlinks commit after their target files", function()
   local root = fresh()
   local s = path.join(root, "stage")
