@@ -54,8 +54,10 @@ Flags:
   --isolate               With -Provide/-ReProvide/-LocalProvide: install into a
                           self-contained store at <root>/zeta/reserve/<pkg>-<version>
                           (package + full dependency closure, exposed through
-                          <root>/zeta/reserve/profile/bin). With -Remove: delete
-                          the isolated store instead of the system copy.
+                          <root>/zeta/reserve/profile/bin and linked into
+                          /usr/bin / /usr/sbin, skipping names already taken).
+                          With -Remove: delete the isolated store instead of
+                          the system copy.
   --no-quote              Disable random startup quotes
 
 Configuration:
@@ -298,6 +300,12 @@ function actions._install(name, flags, opts)
 	if isolate then
 		local old = db.isolated_meta(name)
 		if old and old.reserve_root then
+			-- System links first: they are attributed by reading the wrapper
+			-- body, so the wrappers must still exist when we scan.
+			local nl = reserve.unlink_system(old.reserve_root)
+			if nl > 0 then
+				log.detail(("removed %d system link(s) from a previous install"):format(nl))
+			end
 			local n = reserve.unlink_profile(old.reserve_root)
 			if n > 0 then
 				log.detail(("removed %d stale profile wrapper(s)"):format(n))
@@ -377,12 +385,19 @@ function actions._install(name, flags, opts)
 		end
 	end
 
-	-- Isolated: expose the target's own binaries through the profile.
+	-- Isolated: expose the target's own binaries through the profile, then
+	-- link them into the FHS system bin dirs so they run from the default PATH.
 	if isolate then
-		local created = reserve.link_profile(store, db.isolated_files(name))
+		local files = db.isolated_files(name)
+		local created = reserve.link_profile(store, files)
 		if #created > 0 then
 			log.ok(("%d binary/binaries exposed in %s/profile/bin"):format(
 				#created, config.get().reserve_dir))
+		end
+		local sys = reserve.link_system(store, files)
+		if sys.linked > 0 then
+			log.ok(("%d binary/binaries linked into %s"):format(
+				sys.linked, path.join(config.get().root, "usr/bin")))
 		end
 	end
 
@@ -397,6 +412,13 @@ function actions._install(name, flags, opts)
 	return 0
 end
 
+-- Shown when a normal (non-isolated) install targets a package that only
+-- exists as an isolated store: the two registries are separate, and the user
+-- must consciously drop the store before a system copy can replace it.
+local ISOLATED_CONFLICT_MSG = ("this package has already been installed as isolated! "
+  .. "you will have to remove the isolated package first before reproviding it normally, "
+  .. "if you are sure about this, please use --force")
+
 function actions.provide(names, flags)
 	for _, raw in ipairs(names) do
 		local name = path.sanitize_name(raw)
@@ -404,21 +426,27 @@ function actions.provide(names, flags)
 			log.error("invalid package name: " .. tostring(raw))
 			return 1
 		end
-		-- Isolated installs live in their own registry: a system copy does not
-		-- block them (and vice versa).
-		local already
-		if flags.isolate then
-			already = db.isolated(name)
+		-- Isolated stores live in their own registry: a normal install of an
+		-- isolated package needs an explicit --force acknowledgment first.
+		if not flags.isolate and not flags.force and db.isolated(name) then
+			log.warn(ISOLATED_CONFLICT_MSG)
 		else
-			already = db.is_installed(name)
-		end
-		if not flags.force and already then
-			local m = flags.isolate and db.isolated_meta(name) or db.get(name)
-			log.warn(("%s-%s has already been provided -- use -ReProvide instead"):format(name, m and m.version or "?"))
-		else
-			local ok = actions._install(name, flags, { source = "remote" })
-			if ok ~= 0 then
-				return ok
+			-- Isolated installs live in their own registry: a system copy does
+			-- not block them (and vice versa).
+			local already
+			if flags.isolate then
+				already = db.isolated(name)
+			else
+				already = db.is_installed(name)
+			end
+			if not flags.force and already then
+				local m = flags.isolate and db.isolated_meta(name) or db.get(name)
+				log.warn(("%s-%s has already been provided -- use -ReProvide instead"):format(name, m and m.version or "?"))
+			else
+				local ok = actions._install(name, flags, { source = "remote" })
+				if ok ~= 0 then
+					return ok
+				end
 			end
 		end
 	end
@@ -432,13 +460,17 @@ function actions.reprovide(names, flags)
 			log.error("invalid package name: " .. tostring(raw))
 			return 1
 		end
-		local ok = actions._install(name, {
-			pass = flags.pass,
-			force = true,
-			isolate = flags.isolate,
-		}, { source = "remote" })
-		if ok ~= 0 then
-			return ok
+		if not flags.isolate and not flags.force and db.isolated(name) then
+			log.warn(ISOLATED_CONFLICT_MSG)
+		else
+			local ok = actions._install(name, {
+				pass = flags.pass,
+				force = true,
+				isolate = flags.isolate,
+			}, { source = "remote" })
+			if ok ~= 0 then
+				return ok
+			end
 		end
 	end
 	return 0
@@ -451,19 +483,23 @@ function actions.localprovide(names, flags)
 			log.error("invalid package name: " .. tostring(raw))
 			return 1
 		end
-		local already
-		if flags.isolate then
-			already = db.isolated(name)
+		if not flags.isolate and not flags.force and db.isolated(name) then
+			log.warn(ISOLATED_CONFLICT_MSG)
 		else
-			already = db.is_installed(name)
-		end
-		if not flags.force and already then
-			local m = flags.isolate and db.isolated_meta(name) or db.get(name)
-			log.warn(("%s-%s has already been provided, use -ReProvide instead."):format(name, m and m.version or "?"))
-		else
-			local ok = actions._install(name, flags, { source = "local" })
-			if ok ~= 0 then
-				return ok
+			local already
+			if flags.isolate then
+				already = db.isolated(name)
+			else
+				already = db.is_installed(name)
+			end
+			if not flags.force and already then
+				local m = flags.isolate and db.isolated_meta(name) or db.get(name)
+				log.warn(("%s-%s has already been provided, use -ReProvide instead."):format(name, m and m.version or "?"))
+			else
+				local ok = actions._install(name, flags, { source = "local" })
+				if ok ~= 0 then
+					return ok
+				end
 			end
 		end
 	end
@@ -729,6 +765,11 @@ function actions.remove_isolated(names, flags)
 
   for _, e in ipairs(plan) do
     if e.store then
+      -- System links before wrappers: link attribution reads the wrapper body.
+      local nl = reserve.unlink_system(e.store)
+      if nl > 0 then
+        log.detail(("removed %d system link(s)"):format(nl))
+      end
       local n = reserve.unlink_profile(e.store)
       if n > 0 then
         log.detail(("removed %d profile wrapper(s)"):format(n))
@@ -761,7 +802,11 @@ function actions.remove(names, flags)
   end
   for _, n in ipairs(targets) do
     if not db.kind(n) then
-      log.error(("%s has not been provided."):format(n))
+      if db.isolated(n) then
+        log.error(("%s is installed as isolated -- use -Remove --isolate."):format(n))
+      else
+        log.error(("%s has not been provided."):format(n))
+      end
       return 1
     end
   end

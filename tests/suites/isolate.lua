@@ -172,4 +172,81 @@ suite:test("remove_store refuses paths outside the reserve dir", function()
   lib.assert_false(path.exists(store), "store removed")
 end)
 
+suite:test("link_system mirrors bins into usr/bin and usr/sbin", function()
+  local root = fresh()
+  local cfg = config.get()
+  local store = path.join(cfg.reserve_dir, "tool-1.0")
+  local files = { "usr/bin/tool", "usr/sbin/admin", "usr/lib/libx.so" }
+
+  reserve.link_profile(store, files)
+  local res = reserve.link_system(store, files)
+
+  lib.assert_eq(res.linked, 2, "two links created")
+  lib.assert_eq(res.skipped, 0, "nothing skipped")
+  lib.assert_eq(path.readlink(path.join(root, "usr/bin/tool")),
+    path.join(cfg.reserve_dir, "profile/bin/tool"), "usr/bin link points at wrapper")
+  lib.assert_eq(path.readlink(path.join(root, "usr/sbin/admin")),
+    path.join(cfg.reserve_dir, "profile/bin/admin"), "usr/sbin link points at wrapper")
+  lib.assert_nil(path.readlink(path.join(root, "usr/bin/libx.so")), "libraries never linked")
+end)
+
+suite:test("link_system skips names occupied by a real file", function()
+  local root = fresh()
+  local cfg = config.get()
+  local store = path.join(cfg.reserve_dir, "app-1.0")
+  os.execute("mkdir -p " .. path.quote(path.join(root, "usr/bin")))
+  lib.write(path.join(root, "usr/bin/app"), "#!/bin/sh\necho system\n")
+
+  reserve.link_profile(store, { "usr/bin/app" })
+  local res = reserve.link_system(store, { "usr/bin/app" })
+
+  lib.assert_eq(res.linked, 0, "no link created")
+  lib.assert_eq(res.skipped, 1, "reported as skipped")
+  lib.assert_nil(path.readlink(path.join(root, "usr/bin/app")), "still a regular file")
+  lib.assert_contains(lib.read(path.join(root, "usr/bin/app")), "echo system",
+    "system copy untouched")
+end)
+
+suite:test("link_system replaces another store's reserve link", function()
+  local root = fresh()
+  local cfg = config.get()
+  local store_a = path.join(cfg.reserve_dir, "app-1.0")
+  local store_b = path.join(cfg.reserve_dir, "app-2.0")
+
+  reserve.link_profile(store_a, { "usr/bin/app" })
+  reserve.link_system(store_a, { "usr/bin/app" })
+  reserve.link_profile(store_b, { "usr/bin/app" })
+  local res = reserve.link_system(store_b, { "usr/bin/app" })
+
+  lib.assert_eq(res.linked, 1, "reserve-owned link replaced")
+  lib.assert_eq(path.readlink(path.join(root, "usr/bin/app")),
+    path.join(cfg.reserve_dir, "profile/bin/app"), "same profile target")
+  lib.assert_contains(lib.read(path.join(cfg.reserve_dir, "profile/bin/app")),
+    store_b, "wrapper now belongs to store b")
+end)
+
+suite:test("unlink_system removes only the given store's links", function()
+  local root = fresh()
+  local cfg = config.get()
+  local store_a = path.join(cfg.reserve_dir, "a-1.0")
+  local store_b = path.join(cfg.reserve_dir, "b-1.0")
+  os.execute("mkdir -p " .. path.quote(path.join(root, "usr/bin")))
+  lib.write(path.join(root, "usr/bin/real"), "#!/bin/sh\n")
+
+  reserve.link_profile(store_a, { "usr/bin/tool" })
+  reserve.link_system(store_a, { "usr/bin/tool" })
+  reserve.link_profile(store_b, { "usr/bin/other" })
+  reserve.link_system(store_b, { "usr/bin/other" })
+
+  local removed = reserve.unlink_system(store_a)
+
+  lib.assert_eq(removed, 1, "only a's link removed")
+  lib.assert_nil(path.readlink(path.join(root, "usr/bin/tool")), "a's link gone")
+  lib.assert_eq(path.readlink(path.join(root, "usr/bin/other")),
+    path.join(cfg.reserve_dir, "profile/bin/other"), "b's link kept")
+  lib.assert_nil(path.readlink(path.join(root, "usr/bin/real")), "real file not a link")
+  lib.assert_contains(lib.read(path.join(root, "usr/bin/real")), "#!/bin/sh",
+    "real file untouched")
+end)
+
 return suite
