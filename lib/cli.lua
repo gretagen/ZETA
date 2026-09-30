@@ -47,7 +47,7 @@ local MIN_ARGS = {
 function cli.parse(args)
   local cmd
   local pos = {}
-  local flags = { pass = false, force = false, with_deps = false, detail = false, silence = false, no_quote = false }
+  local flags = { pass = false, force = false, with_deps = false, detail = false, silence = false, no_quote = false, isolate = false }
 
   for _, a in ipairs(args) do
     if a:match("^%-%-") then
@@ -68,6 +68,8 @@ function cli.parse(args)
         log.set_file_silent(true)
       elseif key == "no-quote" then
         flags.no_quote = true
+      elseif key == "isolate" then
+        flags.isolate = true
       elseif key == "help" then
         cmd = "help"
       elseif key == "dir" then

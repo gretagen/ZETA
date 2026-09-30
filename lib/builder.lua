@@ -299,16 +299,24 @@ function builder.verify_payload(manifest, payload)
   end
 end
 
--- install(manifest, opts) -- opts: { force, source, local_dir, kind, pre_fetched }
+-- install(manifest, opts) -- opts: { force, source, local_dir, kind, pre_fetched,
+--                                    isolate_root, record }
 -- opts.kind is "package" for an explicit install or "dependency" for an
 -- auto-installed dependency (see actions.lua); it decides which database
 -- registry the entry lands in.
 -- opts.pre_fetched is an optional path to an already-downloaded payload;
 -- when set, obtain_payload is skipped and the given path is used directly.
+-- opts.isolate_root is an explicit install root (the /zeta/reserve store for
+-- an isolated package). When set, files commit into that root instead of
+-- config.root, and the host linker cache is left alone.
+-- opts.record (default true) controls the database write: dependency installs
+-- into an isolated store are not registered (the whole store is removed as a
+-- unit when the owning package is uninstalled).
 function builder.install(manifest, opts)
   opts = opts or {}
   local cfg = config.get()
   local name = manifest.name
+  local dest_root = opts.isolate_root or cfg.root
 
   log.step(("installing %s-%s"):format(name, manifest.version))
 
@@ -367,20 +375,34 @@ function builder.install(manifest, opts)
       manifest.install(p)
     end
 
-    log.step(("committing files to %s"):format(cfg.root))
+    log.step(("committing files to %s"):format(dest_root))
     local owned = commit.apply(stage, {
       whitelist = manifest.files,
       force = opts.force,
       pkg_name = name,
+      root = opts.isolate_root,
     })
 
+    if opts.record == false then
+      -- Dependency pulled into an isolated store: the files landed, but only
+      -- the owning package is registered (the store is removed as a unit).
+      return
+    end
+
     manifest.source = opts.source or "remote"
-    db.record(name, manifest, owned_rels(owned), { kind = opts.kind })
+    db.record(name, manifest, owned_rels(owned), {
+      kind = opts.kind,
+      isolated = opts.isolate_root ~= nil,
+      reserve_root = opts.isolate_root,
+    })
     -- Mirror this entry's deps into each dependency's dependents list so
     -- -Remove knows what still requires it (covers deps installed earlier in
-    -- this run AND deps that were already present).
-    for _, d in ipairs(manifest.deps or {}) do
-      if db.is_installed(d.name) then db.add_dependent(d.name, name) end
+    -- this run AND deps that were already present). Isolated stores skip this:
+    -- they are self-contained and removed wholesale.
+    if opts.isolate_root == nil then
+      for _, d in ipairs(manifest.deps or {}) do
+        if db.is_installed(d.name) then db.add_dependent(d.name, name) end
+      end
     end
   end)
 

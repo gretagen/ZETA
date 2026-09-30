@@ -81,6 +81,7 @@ function config.load(script_dir)
     cache_dir = getenv("ZETA_CACHE") or (cfg_file and cfg_file.cache_dir) or under("var/cache/zeta"),
     state_dir = getenv("ZETA_STATE") or (cfg_file and cfg_file.state_dir) or under("var/db/zeta"),
     tmp_dir = getenv("ZETA_TMP") or (cfg_file and cfg_file.tmp_dir) or under("var/tmp/zeta"),
+    reserve_dir = getenv("ZETA_RESERVE") or (cfg_file and cfg_file.reserve_dir) or under("zeta/reserve"),
     verbose = (getenv("ZETA_VERBOSE") == "1" or getenv("ZETA_VERBOSE") == "true")
               or (cfg_file and cfg_file.verbose == true)
               or false,

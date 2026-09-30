@@ -190,8 +190,9 @@ function archive.extract_tar(archive_file, dest, opts)
   local ok, verr = archive.validate(entries)
   if not ok then return nil, verr end
   local strip = opts.strip or 0
-  -- Always show tar extraction output so the user sees files being installed.
-  local listing = "-xvf"
+  -- --silence opts out of the -v member listing; verbose extraction is the
+  -- default so users see what is being installed.
+  local listing = log.is_file_silent() and "-xf" or "-xvf"
   -- GNU tar only honors --exclude once it has seen the archive operand, so
   -- the flags go AFTER the file name (before -f they are taken as operands).
   local cmd = TAR_ENV .. " tar " .. listing .. " " .. path.quote(archive_file)
@@ -235,7 +236,7 @@ function archive.extract_arch_pkg(archive_file, dest, opts)
   -- Arch packages ship absolute symlinks (e.g. mate-panel help docs).
   -- These are harmless: tar creates them as-is and they resolve at runtime
   -- against the real root. We skip validation and extract directly.
-  local listing = "-xvf"
+  local listing = log.is_file_silent() and "-xf" or "-xvf"
   local cmd = TAR_ENV .. " tar " .. listing .. " " .. path.quote(archive_file)
     .. " -C " .. path.quote(dest) .. " --no-same-owner"
   for _, glob in ipairs({ ".PKGINFO", ".MTREE", ".BUILDINFO", ".INSTALL" }) do

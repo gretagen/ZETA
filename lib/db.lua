@@ -1,9 +1,13 @@
 -- db.lua -- the installed-package database.
 --
--- State lives at <ZETA_ROOT>/var/db/zeta/ split into two registries:
+-- State lives at <ZETA_ROOT>/var/db/zeta/ split into three registries:
 --   packages/<name>/      explicitly installed packages (kind = "package")
 --   dependencies/<name>/   packages pulled in automatically as dependencies
 --                          (kind = "dependency")
+--   isolated/<name>/       packages installed into a /zeta/reserve store with
+--                          --isolate; meta carries `reserve_root`. Shares no
+--                          queries with the other two (a name may exist in
+--                          both a system and an isolated registry).
 -- Each entry contains:
 --   meta.lua  -- a serialized manifest (return {...}), loaded under the sandbox
 --   files     -- one owned relative path per line
@@ -67,6 +71,13 @@ function db.dependencies_dir()
   return path.join(db.dir(), "dependencies")
 end
 
+-- Isolated installs (/zeta/reserve stores) live in a third registry so a
+-- package name can exist as both a system package and an isolated store
+-- without either view seeing the other.
+function db.isolated_dir()
+  return path.join(db.dir(), "isolated")
+end
+
 local migrated = {}
 local migrating = {}
 
@@ -82,7 +93,7 @@ local function ensure_migrated()
   local f = path.popen("ls -1 " .. path.quote(sd) .. " 2>/dev/null")
   if f then
     for line in f:lines() do
-      if line ~= "" and line ~= "packages" and line ~= "dependencies" then
+      if line ~= "" and line ~= "packages" and line ~= "dependencies" and line ~= "isolated" then
         local entry = path.join(sd, line)
         if path.exists(path.join(entry, "meta.lua")) then
           path.mkdir_p(db.packages_dir())
@@ -182,6 +193,38 @@ function db.list_dependencies()
   return list_dir(db.dependencies_dir())
 end
 
+-- Isolated registry queries. These intentionally do NOT participate in
+-- db.kind / db.list / db.files: the same name may be installed both ways and
+-- the two views must never mix.
+
+function db.isolated(name)
+  return path.exists(path.join(db.isolated_dir(), name, "meta.lua"))
+end
+
+function db.list_isolated()
+  return list_dir(db.isolated_dir())
+end
+
+function db.isolated_meta(name)
+  local chunk = sandbox.loadfile(path.join(db.isolated_dir(), name, "meta.lua"))
+  if not chunk then return nil end
+  local ok, m = pcall(chunk)
+  if not ok or type(m) ~= "table" then return nil end
+  return m
+end
+
+function db.isolated_files(name)
+  local f = io.open(path.join(db.isolated_dir(), name, "files"), "rb")
+  if not f then return {} end
+  local content = f:read("*a")
+  f:close()
+  local files = {}
+  for line in content:gmatch("[^\n]+") do
+    if line ~= "" then files[#files + 1] = line end
+  end
+  return files
+end
+
 -- Every installed entry (packages + dependencies), sorted.
 function db.list()
   local names = db.list_packages()
@@ -250,19 +293,28 @@ end
 
 -- Record an installed entry. Writes are atomic (write temp, then rename), so
 -- an interrupted install never leaves a half-written database entry.
--- opts: { kind = "package" | "dependency" }. An existing entry's `dependents`
--- list is preserved across reinstalls.
+-- opts: { kind = "package" | "dependency", isolated = bool, reserve_root }.
+-- Isolated entries go to the isolated/ registry and carry their store path;
+-- they never migrate between registries and never mix with system entries.
+-- An existing entry's `dependents` list is preserved across reinstalls.
 function db.record(name, meta, files, opts)
   opts = opts or {}
   local kind = opts.kind == "dependency" and "dependency" or "package"
   ensure_migrated()
-  local old = db.get(name)
-  -- Re-classification moves the entry between registries; remove the stale
-  -- location so a name never exists in both.
-  local here = kind == "dependency" and db.dependencies_dir() or db.packages_dir()
-  local other = kind == "dependency" and db.packages_dir() or db.dependencies_dir()
-  if path.exists(path.join(other, name, "meta.lua")) then
-    path.run("rm -rf " .. path.quote(path.join(other, name)))
+
+  local here, old
+  if opts.isolated then
+    here = db.isolated_dir()
+    old = db.isolated_meta(name)
+  else
+    old = db.get(name)
+    -- Re-classification moves the entry between registries; remove the stale
+    -- location so a name never exists in both.
+    here = kind == "dependency" and db.dependencies_dir() or db.packages_dir()
+    local other = kind == "dependency" and db.packages_dir() or db.dependencies_dir()
+    if path.exists(path.join(other, name, "meta.lua")) then
+      path.run("rm -rf " .. path.quote(path.join(other, name)))
+    end
   end
   local deps = {}
   for _, d in ipairs(meta.deps or {}) do
@@ -281,6 +333,10 @@ function db.record(name, meta, files, opts)
     source = meta.source or "remote",
     installed_at = os.time(),
   }
+  if opts.isolated then
+    m.isolated = true
+    m.reserve_root = opts.reserve_root
+  end
   path.mkdir_p(path.join(here, name))
   local t1 = path.join(here, name, "meta.lua.tmp")
   local t2 = path.join(here, name, "files.tmp")
@@ -330,6 +386,12 @@ end
 function db.remove(name)
   ensure_migrated()
   path.run("rm -rf " .. path.quote(db.pkg_dir(name)))
+end
+
+-- Remove an isolated registry entry (the store itself is removed by the
+-- caller, which owns the reserve path).
+function db.remove_isolated(name)
+  path.run("rm -rf " .. path.quote(path.join(db.isolated_dir(), name)))
 end
 
 -- Return the name of the package that owns `rel`, or nil if untracked.

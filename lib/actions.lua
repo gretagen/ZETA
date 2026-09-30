@@ -22,6 +22,7 @@ local vercmp = require("vercmp")
 local hooks = require("hooks")
 local fetch = require("fetch")
 local spinner = require("spinner")
+local reserve = require("reserve")
 
 local HELP = [[
 Zeta -- Haliade OS package manager
@@ -48,8 +49,13 @@ Flags:
                           required by any installed package (never removes packages
                           installed explicitly)
   --detail                With -Remove, list every file that would be deleted
-  --silence               Suppress per-file 'provided' output and tar extraction
-                           listings (faster on slow terminals)
+  --silence               Suppress tar extraction file listings
+                          (faster on slow terminals)
+  --isolate               With -Provide/-ReProvide/-LocalProvide: install into a
+                          self-contained store at <root>/zeta/reserve/<pkg>-<version>
+                          (package + full dependency closure, exposed through
+                          <root>/zeta/reserve/profile/bin). With -Remove: delete
+                          the isolated store instead of the system copy.
   --no-quote              Disable random startup quotes
 
 Configuration:
@@ -64,9 +70,10 @@ Configuration:
       quotes = false,
     }
 
-Installed state is tracked in two registries under /var/db/zeta:
+Installed state is tracked in three registries under /var/db/zeta:
   packages/<name>      every package you installed explicitly
   dependencies/<name>  packages pulled in automatically as dependencies
+  isolated/<name>      packages installed with --isolate (meta carries reserve_root)
 
 Environment:
   ZETA_ROOT            Filesystem root packages are installed into   (default: /)
@@ -76,6 +83,7 @@ Environment:
   ZETA_CACHE           Download cache                                (default: $ZETA_ROOT/var/cache/zeta)
   ZETA_STATE           Package database                              (default: $ZETA_ROOT/var/db/zeta)
   ZETA_VERBOSE         Verbose output (1 or true to enable)          (default: false)
+  ZETA_RESERVE         Isolated package store location               (default: $ZETA_ROOT/zeta/reserve)
 
 Package format (one package.lua per package, returning a table):
   return {
@@ -128,9 +136,12 @@ local function plan_kind(item, target)
 end
 
 -- Shared install flow for -Provide / -LocalProvide / -ReProvide.
+-- flags.isolate: install into a self-contained store under the reserve dir
+-- (package + full dependency closure), exposed through the profile bin dir.
 function actions._install(name, flags, opts)
 	local source = opts.source
 	local base = config.get().local_packages
+	local isolate = flags.isolate == true
 
 	local fetch_manifest
 	if source == "local" then
@@ -166,7 +177,9 @@ function actions._install(name, flags, opts)
 	while #queue > 0 do
 		local batch = {}
 		for _, n in ipairs(queue) do
-			if not manifest_cache[n] and not db.is_installed(n) then
+			-- Isolated installs prefetch everything: a system-installed dep
+			-- does not satisfy a store that must be self-contained.
+			if not manifest_cache[n] and (isolate or not db.is_installed(n)) then
 				batch[#batch + 1] = n
 			end
 		end
@@ -221,6 +234,9 @@ function actions._install(name, flags, opts)
 	local ok, plan = pcall(deps.resolve, name, {
 		fetch_manifest = cached_fetch_manifest,
 		installed_version = function(n)
+			-- Isolation never accepts a system-installed dep: the store gets
+			-- its own copy of the whole closure.
+			if isolate then return nil end
 			local m = db.get(n)
 			return m and m.version or nil
 		end,
@@ -245,14 +261,56 @@ function actions._install(name, flags, opts)
 		end
 	end
 
+	-- Isolated install: the store path is derived from the target's version.
+	local store
+	if isolate then
+		local target_manifest
+		for _, item in ipairs(plan) do
+			if item.name == name then target_manifest = item.manifest break end
+		end
+		store = reserve.store_path(name, target_manifest and target_manifest.version)
+	end
+
 	for _, item in ipairs(plan) do
 		print(("  will provide %s-%s"):format(item.name, item.manifest.version))
 	end
+	if isolate then
+		print(("  isolated at %s"):format(store))
+	end
 	print("")
 
-	if not confirm(("Install %d package(s)?"):format(#plan), flags.pass) then
+	local confirm_msg
+	if isolate then
+		confirm_msg = ("Install %d package(s) isolated at %s?"):format(#plan, store)
+	else
+		confirm_msg = ("Install %d package(s)?"):format(#plan)
+	end
+	if not confirm(confirm_msg, flags.pass) then
 		log.info("aborted by user")
 		return 0
+	end
+
+	-- A store is self-contained: nothing outside references its internals
+	-- (only profile wrappers, recreated below), so a reinstall starts clean.
+	-- Wiped only after the user confirmed. Wrappers of the previous
+	-- incarnation go first so a version upgrade cannot leave stale entries
+	-- pointing at a store that no longer exists.
+	if isolate then
+		local old = db.isolated_meta(name)
+		if old and old.reserve_root then
+			local n = reserve.unlink_profile(old.reserve_root)
+			if n > 0 then
+				log.detail(("removed %d stale profile wrapper(s)"):format(n))
+			end
+			if old.reserve_root ~= store then
+				local ok, err = reserve.remove_store(old.reserve_root)
+				if not ok then log.warn(tostring(err)) end
+			end
+		end
+		if path.exists(store) then
+			log.detail(("clearing previous store at %s"):format(store))
+			path.run("rm -rf " .. path.quote(store))
+		end
 	end
 
 	local installed = {}
@@ -261,7 +319,7 @@ function actions._install(name, flags, opts)
 	-- Phase 1: Resolve and download all payloads in parallel.
 	local fetch_items = {}
 	for _, item in ipairs(plan) do
-		if not (db.is_installed(item.name) and not flags.force) then
+		if isolate or not (db.is_installed(item.name) and not flags.force) then
 			local info, err = builder.fetch_payload(item.manifest, {
 				local_dir = item.manifest._local_dir,
 			})
@@ -297,7 +355,7 @@ function actions._install(name, flags, opts)
 
 	-- Phase 2: Build, commit, and record each package sequentially.
 	for _, item in ipairs(plan) do
-		if db.is_installed(item.name) and not flags.force then
+		if not isolate and db.is_installed(item.name) and not flags.force then
 			log.warn(("%s already provided, skipping"):format(item.name))
 		else
 			local iok, ierr = pcall(builder.install, item.manifest, {
@@ -306,6 +364,10 @@ function actions._install(name, flags, opts)
 				local_dir = item.manifest._local_dir,
 				kind = plan_kind(item.name, name),
 				pre_fetched = pre_fetched[item.name],
+				isolate_root = store,
+				-- Only the target is registered; its deps are store internals
+				-- and disappear with the store on removal.
+				record = (not isolate) or item.name == name,
 			})
 			if not iok then
 				log.error(tostring(ierr))
@@ -315,8 +377,18 @@ function actions._install(name, flags, opts)
 		end
 	end
 
+	-- Isolated: expose the target's own binaries through the profile.
+	if isolate then
+		local created = reserve.link_profile(store, db.isolated_files(name))
+		if #created > 0 then
+			log.ok(("%d binary/binaries exposed in %s/profile/bin"):format(
+				#created, config.get().reserve_dir))
+		end
+	end
+
 	-- Post-transaction hooks (deps already present on disk at this point).
-	if next(installed) then
+	-- Isolated stores never run host hooks: hooks are system-level.
+	if next(installed) and not isolate then
 		local hfail = pcall(hooks.run_installed, installed)
 		if not hfail then
 			log.error("hook runner failed")
@@ -332,8 +404,16 @@ function actions.provide(names, flags)
 			log.error("invalid package name: " .. tostring(raw))
 			return 1
 		end
-		if not flags.force and db.is_installed(name) then
-			local m = db.get(name)
+		-- Isolated installs live in their own registry: a system copy does not
+		-- block them (and vice versa).
+		local already
+		if flags.isolate then
+			already = db.isolated(name)
+		else
+			already = db.is_installed(name)
+		end
+		if not flags.force and already then
+			local m = flags.isolate and db.isolated_meta(name) or db.get(name)
 			log.warn(("%s-%s has already been provided -- use -ReProvide instead"):format(name, m and m.version or "?"))
 		else
 			local ok = actions._install(name, flags, { source = "remote" })
@@ -352,7 +432,11 @@ function actions.reprovide(names, flags)
 			log.error("invalid package name: " .. tostring(raw))
 			return 1
 		end
-		local ok = actions._install(name, { pass = flags.pass, force = true }, { source = "remote" })
+		local ok = actions._install(name, {
+			pass = flags.pass,
+			force = true,
+			isolate = flags.isolate,
+		}, { source = "remote" })
 		if ok ~= 0 then
 			return ok
 		end
@@ -367,8 +451,14 @@ function actions.localprovide(names, flags)
 			log.error("invalid package name: " .. tostring(raw))
 			return 1
 		end
-		if not flags.force and db.is_installed(name) then
-			local m = db.get(name)
+		local already
+		if flags.isolate then
+			already = db.isolated(name)
+		else
+			already = db.is_installed(name)
+		end
+		if not flags.force and already then
+			local m = flags.isolate and db.isolated_meta(name) or db.get(name)
 			log.warn(("%s-%s has already been provided, use -ReProvide instead."):format(name, m and m.version or "?"))
 		else
 			local ok = actions._install(name, flags, { source = "local" })
@@ -391,21 +481,37 @@ local function print_section(title, names)
 	end
 end
 
+local function print_isolated_section(names)
+	print(("ISOLATED (%d)"):format(#names))
+	print(("%-20s %-16s %s"):format("PACKAGE", "VERSION", "STORE"))
+	print(string.rep("-", 60))
+	for _, n in ipairs(names) do
+		local m = db.isolated_meta(n)
+		print(("%-20s %-16s %s"):format(n, m and m.version or "?", m and m.reserve_root or "?"))
+	end
+end
+
 function actions.list()
 	local packages = db.list_packages()
 	local dependencies = db.list_dependencies()
-	if #packages == 0 and #dependencies == 0 then
+	local isolated = db.list_isolated()
+	if #packages == 0 and #dependencies == 0 and #isolated == 0 then
 		log.info("no packages provided")
 		return 0
 	end
+	local first = true
 	if #packages > 0 then
 		print_section(("PACKAGES (%d)"):format(#packages), packages)
-		if #dependencies > 0 then
-			print("")
-		end
+		first = false
 	end
 	if #dependencies > 0 then
+		if not first then print("") end
 		print_section(("DEPENDENCIES (%d)"):format(#dependencies), dependencies)
+		first = false
+	end
+	if #isolated > 0 then
+		if not first then print("") end
+		print_isolated_section(isolated)
 	end
 	return 0
 end
@@ -586,7 +692,63 @@ local function resolve_cascade(planned, seed)
   return order, skip
 end
 
+-- -Remove --isolate: delete isolated stores wholesale. Each isolated package
+-- is a self-contained environment, so removing any member (there is only the
+-- target registered anyway) removes the whole store: profile wrappers first,
+-- then the store directory, then the registry entry.
+function actions.remove_isolated(names, flags)
+  local targets = {}
+  for _, raw in ipairs(names) do
+    local name = path.sanitize_name(raw)
+    if not name then
+      log.error("package is invalid : " .. tostring(raw))
+      return 1
+    end
+    if not db.isolated(name) then
+      log.error(("%s is not an isolated package."):format(name))
+      return 1
+    end
+    targets[#targets + 1] = name
+  end
+
+  print("")
+  local plan = {}
+  for _, n in ipairs(targets) do
+    local m = db.isolated_meta(n)
+    local entry = { name = n, version = m and m.version or "?", store = m and m.reserve_root }
+    plan[#plan + 1] = entry
+    print(("  will remove %s-%s (isolated store %s)"):format(entry.name, entry.version, entry.store or "?"))
+  end
+  print("")
+
+  local noun = #plan == 1 and "1 isolated package" or (#plan .. " isolated packages")
+  if not confirm(("Remove %s?"):format(noun), flags.pass, " [y/N]", true) then
+    log.info("aborted by user")
+    return 0
+  end
+
+  for _, e in ipairs(plan) do
+    if e.store then
+      local n = reserve.unlink_profile(e.store)
+      if n > 0 then
+        log.detail(("removed %d profile wrapper(s)"):format(n))
+      end
+      local ok, err = reserve.remove_store(e.store)
+      if not ok then
+        log.error(tostring(err))
+        return 1
+      end
+    end
+    db.remove_isolated(e.name)
+    log.ok(("removed %s"):format(e.name))
+  end
+  return 0
+end
+
 function actions.remove(names, flags)
+  if flags.isolate then
+    return actions.remove_isolated(names, flags)
+  end
   -- 1) Sanitize and validate all names up-front.
   local targets = {}
   for _, raw in ipairs(names) do

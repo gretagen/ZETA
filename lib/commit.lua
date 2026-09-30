@@ -61,7 +61,9 @@ local function walk_staging(staging)
 end
 
 -- apply(staging, opts) -> owned entries (files + symlinks + dirs).
--- opts: whitelist (list of rel paths to commit), force, pkg_name.
+-- opts: whitelist (list of rel paths to commit), force, pkg_name,
+--       root (explicit install root — overrides config; set for isolated
+--       installs so the host filesystem and linker cache are never touched).
 function commit.apply(staging, opts)
   opts = opts or {}
   local entries = walk_staging(staging)
@@ -76,7 +78,8 @@ function commit.apply(staging, opts)
     entries = filtered
   end
 
-  local root = config.get().root
+  local root = opts.root or config.get().root
+  local isolated = opts.root ~= nil
 
   -- Owned entries are all concrete paths a package ships. Filter out directory
   -- entries that are prefixes of other entries: if a package owns usr/bin/hello,
@@ -222,29 +225,35 @@ function commit.apply(staging, opts)
     log.info(("- committed %d dirs to %s"):format(dir_count, root))
   end
 
-  -- Ensure the dynamic linker knows about /usr/lib and /lib. The default
-  -- ld.so.conf only lists /usr/local/lib and /opt/lib; without these paths
-  -- ldconfig cannot populate the cache for libraries installed by ZETA.
-  local ldconf = path.join(root, "etc/ld.so.conf.d/00-usr.conf")
-  if not path.exists(ldconf) then
-    path.mkdir_p(path.dirname(ldconf))
-    local f = io.open(ldconf, "w")
-    if f then
-      f:write("/lib\n/usr/lib\n")
-      f:close()
+  -- Linker cache maintenance only applies to the real system root: an
+  -- isolated store never touches the host's ld.so.conf or ld.so.cache (its
+  -- binaries resolve libraries through the profile wrapper's LD_LIBRARY_PATH).
+  if not isolated then
+    -- Ensure the dynamic linker knows about /usr/lib and /lib. The default
+    -- ld.so.conf only lists /usr/local/lib and /opt/lib; without these paths
+    -- ldconfig cannot populate the cache for libraries installed by ZETA.
+    local ldconf = path.join(root, "etc/ld.so.conf.d/00-usr.conf")
+    if not path.exists(ldconf) then
+      path.mkdir_p(path.dirname(ldconf))
+      local f = io.open(ldconf, "w")
+      if f then
+        f:write("/lib\n/usr/lib\n")
+        f:close()
+      end
+    end
+
+    -- Rebuild the shared library cache so newly installed libraries are found
+    -- at runtime. ldconfig is idempotent and fast.
+    log.step("Regenerating ldconfig cache")
+    if path.run("ldconfig") then
+      log.ok("ld.so.cache updated")
+    else
+      log.warn("ldconfig failed (non-fatal, but libraries may not be found at runtime)")
     end
   end
 
-  -- Rebuild the shared library cache so newly installed libraries are found
-  -- at runtime. ldconfig is idempotent and fast.
-  log.step("Regenerating ldconfig cache")
-  if path.run("ldconfig") then
-    log.ok("ld.so.cache updated")
-  else
-    log.warn("ldconfig failed (non-fatal, but libraries may not be found at runtime)")
-  end
-
-  -- Auto-compile GSettings schemas if any were installed.
+  -- Auto-compile GSettings schemas if any were installed (rooted at whatever
+  -- root is in use, so isolated stores get their own gschemas.compiled).
   local schemas_dir = root .. "/usr/share/glib-2.0/schemas"
   local has_schema = false
   for _, e in ipairs(owned) do
