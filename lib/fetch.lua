@@ -14,6 +14,8 @@ local config = require("config")
 
 local downloader
 
+local quotes = require("quotes")
+
 -- GitHub serves raw file bytes from raw.githubusercontent.com, not from
 -- github.com (which returns HTML). Rewrite a github.com repo URL to its raw
 -- equivalent. We pin the ref to refs/heads/main instead of the symbolic
@@ -103,6 +105,38 @@ local function clear_bar()
   io.write("\n")
   io.flush()
 end
+
+-- Slow-download taunts. make_slow_ticker(after, every, active, list) returns
+-- a tick() closure that yields a quote string when one is due (first after
+-- `after` seconds, then every `every` seconds) and nil otherwise. Never
+-- repeats the previous quote back-to-back. Returns an always-nil tick when
+-- inactive so call sites stay branch-free.
+local SLOW_AFTER = 10
+local SLOW_EVERY = 15
+
+local function make_slow_ticker(after, every, active, list)
+  if not active or type(list) ~= "table" or #list == 0 then
+    return function() return nil end
+  end
+  local next_at = os.time() + after
+  local last
+  return function()
+    local now = os.time()
+    if now < next_at then return nil end
+    next_at = now + every
+    local idx = math.random(#list)
+    -- Never serve the same quote twice in a row (walks at most one full
+    -- revolution; a list of identical entries is a no-op).
+    for _ = 1, #list do
+      if list[idx] ~= last then break end
+      idx = (idx % #list) + 1
+    end
+    last = list[idx]
+    return last
+  end
+end
+-- Exposed for the test suite; not part of the public API.
+fetch._slow_ticker = make_slow_ticker
 
 -- Download with a progress bar. Runs curl/wget in the background, monitors
 -- stderr for progress updates, and renders a bar. Falls back to an
@@ -231,11 +265,44 @@ echo $? > "]]  .. dest .. ".rc" .. [["
     .. path.quote(dl)
 
   -- Show label above bar if on a terminal.
-  if spinner.enabled() and label then
+  local use_tty = spinner.enabled()
+  if use_tty and label then
     render_bar(0, label)
   end
 
-  local a, b, c = os.execute(cmd)
+  -- Launch the script in the background (same pattern as get_parallel) so
+  -- Lua can tick slow-download quotes while the script's shell loop keeps
+  -- drawing the bar.
+  local pid_file = dest .. ".pid"
+  os.execute(cmd .. " & echo $! > " .. path.quote(pid_file))
+  local pid
+  local pf = io.open(pid_file, "r")
+  if pf then
+    pid = pf:read("*l")
+    pf:close()
+  end
+  os.remove(pid_file)
+
+  -- Register cleanup so Ctrl+C kills the background download script.
+  local function progress_cleanup()
+    if pid then
+      path.run("kill " .. tostring(pid) .. " 2>/dev/null")
+      pid = nil
+    end
+  end
+  path.on_cleanup(progress_cleanup)
+
+  local slow_tick = make_slow_ticker(SLOW_AFTER, SLOW_EVERY,
+    use_tty and quotes.is_enabled(), quotes.slowdownload)
+  while pid and path.run("kill -0 " .. pid .. " 2>/dev/null") do
+    local q = slow_tick()
+    if q then
+      io.write("\n")
+      log.detail(q)
+    end
+    os.execute("sleep 0.5")
+  end
+  path.remove_cleanup(progress_cleanup)
 
   -- Read exit code saved by the script.
   local rc = 1
@@ -452,8 +519,8 @@ function fetch.get_parallel(items, opts)
     io.flush()
   end
 
-  local start_time = os.time()
-  local slow_warned = false
+  local slow_tick = make_slow_ticker(SLOW_AFTER, SLOW_EVERY,
+    use_spinner and quotes.is_enabled(), quotes.slowdownload)
 
   while pid and path.run("kill -0 " .. pid .. " 2>/dev/null") do
     -- Count completed downloads and find the newest completion.
@@ -483,12 +550,14 @@ function fetch.get_parallel(items, opts)
       io.write(("\r\27[K  [" .. string.rep("=", filled) .. "%s" .. string.rep(" ", empty) .. "] %s  %d/%d"):format(spinner_char, last_name, completed, total))
       io.flush()
     end
-    os.execute("sleep 0.1")
-    if not slow_warned and os.time() - start_time > 30 then
-      slow_warned = true
-      io.write("\n  download is taking longer than expected, hang in there.\n")
-      io.flush()
+    -- Slow-download taunt: leave the progress line, quote above it; the next
+    -- tick redraws the bar on the line below.
+    local q = slow_tick()
+    if q then
+      io.write("\n")
+      log.detail(q)
     end
+    os.execute("sleep 0.1")
   end
 
   path.remove_cleanup(parallel_cleanup)

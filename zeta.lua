@@ -29,9 +29,10 @@ end
 local cfg = config.load(here)
 
 local show_quotes = not parsed.flags.no_quote and cfg.quotes ~= false
+-- Let runtime quotes (slow downloads) honor --no-quote and the config too.
+quotes.set_enabled(show_quotes)
 if show_quotes then
-  local list = quotes[parsed.command] or quotes.default
-  log.banner(list[math.random(#list)])
+  log.banner(quotes.pick(quotes.for_command(parsed.command, parsed.flags.isolate)))
 else
   log.banner("Initializing ZETA...")
 end

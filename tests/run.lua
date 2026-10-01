@@ -19,7 +19,7 @@ local lib = require("lib")
 
 local ALL_SUITES = {
   "vercmp", "sha256", "path", "cli", "sandbox", "manifest",
-  "config", "deps", "fetch", "spinner", "archive", "checksum", "packages", "db", "commit", "hooks", "isolate", "e2e",
+  "config", "deps", "fetch", "spinner", "archive", "checksum", "packages", "db", "commit", "hooks", "isolate", "quotes", "e2e",
 }
 
 local wanted = {}

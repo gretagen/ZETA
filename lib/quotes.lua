@@ -3,6 +3,7 @@
 -- you can disable quotes using the --no-quote flag or in the config
 
 math.randomseed(os.time()) -- Needed for quotes to be randomized
+
 local quotes = {
   transcend = {
     "Let's not go outdated.",
@@ -129,6 +130,61 @@ local quotes = {
     "Remember to report any bugs on the github!",
   },
 
+  slowdownload = {
+   "This is a waste of your time",
+   "Consider getting a better router",
+   "For your own sanity please get better internet access",
+   "Slow isn't it?",
+   "It's not your fault if your internet is so mediocre",
+   "Feels like we're still in the 90's",
+   "Patience, my child",
+   "This is not a ZETA issue, this is just your internet being slow.",
+  },
+
+  isolate = {
+  	"It was for the greater good ma'am!",
+  	"Reproducible, Reliable, With nit Freedom.",
+  	"To save you from dependency hell.",
+  	"Isolating is a way to know ourselves.",
+  	"But your isolation must not be mechanical, but spiritual, that is, must be elevation.",
+  	"There's only two ways to be completely alone in this world, lost in a crowd or in total isolation.",
+    "Liberty is the possibility of isolation.",
+    "Prevent conflicts, at a cost. (Your storage)",
+    "Composing demands a degree of isolation.",
+    "Doctor, are you sure this will work?"
+  },
 }
+
+-- ---------------------------------------------------------------------------
+-- Runtime API
+-- ---------------------------------------------------------------------------
+
+-- Global switch: zeta.lua calls set_enabled() from --no-quote and the quotes
+-- config so runtime quotes (slow downloads) honor both.
+local enabled = true
+
+function quotes.set_enabled(v)
+  enabled = (v == true)
+end
+
+function quotes.is_enabled()
+  return enabled
+end
+
+-- Random element of `list`; nil when the list is empty or not a table.
+function quotes.pick(list)
+  if type(list) ~= "table" or #list == 0 then return nil end
+  return list[math.random(#list)]
+end
+
+-- Selection rule for the startup banner. Only -Provide --isolate gets the
+-- isolate quotes: -ReProvide/--LocalProvide with --isolate keep their own
+-- command quotes, and -Remove --isolate keeps the remove quotes.
+function quotes.for_command(cmd, isolate)
+  if isolate and cmd == "provide" and quotes.isolate then
+    return quotes.isolate
+  end
+  return quotes[cmd] or quotes.default
+end
 
 return quotes

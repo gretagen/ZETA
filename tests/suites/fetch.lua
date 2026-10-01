@@ -128,4 +128,37 @@ suite:test("fetch.get_parallel handles empty list", function()
   lib.assert_eq(#results, 0)
 end)
 
+suite:test("slow ticker fires immediately when after=0, then stays quiet", function()
+  local tick = fetch._slow_ticker(0, 15, true, { "quote-a", "quote-b" })
+  local first = tick()
+  lib.assert_true(first == "quote-a" or first == "quote-b",
+    "fires on first tick with after=0")
+  lib.assert_nil(tick(), "silent until the repeat window opens")
+end)
+
+suite:test("slow ticker never repeats the previous quote", function()
+  -- after=0, every=0: each tick is due immediately.
+  local tick = fetch._slow_ticker(0, 0, true, { "a", "b" })
+  local prev = tick()
+  for _ = 1, 10 do
+    local cur = tick()
+    lib.assert_true(cur ~= prev, "consecutive quotes must differ")
+    prev = cur
+  end
+end)
+
+suite:test("slow ticker is silent when inactive or the list is empty", function()
+  local inactive = fetch._slow_ticker(0, 15, false, { "quote" })
+  lib.assert_nil(inactive(), "inactive ticker never fires")
+  local empty = fetch._slow_ticker(0, 15, true, {})
+  lib.assert_nil(empty(), "empty list never fires")
+  local no_list = fetch._slow_ticker(0, 15, true, nil)
+  lib.assert_nil(no_list(), "nil list never fires")
+end)
+
+suite:test("slow ticker holds the threshold before first fire", function()
+  local tick = fetch._slow_ticker(3600, 15, true, { "quote" })
+  lib.assert_nil(tick(), "not due within the first hour")
+end)
+
 return suite
