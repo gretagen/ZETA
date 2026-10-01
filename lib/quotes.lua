@@ -143,7 +143,7 @@ local quotes = {
 
   isolate = {
   	"It was for the greater good ma'am!",
-  	"Reproducible, Reliable, With nit Freedom.",
+  	"Reproducible, Reliable, With init Freedom.",
   	"To save you from dependency hell.",
   	"Isolating is a way to know ourselves.",
   	"But your isolation must not be mechanical, but spiritual, that is, must be elevation.",
