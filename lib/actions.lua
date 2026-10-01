@@ -48,7 +48,7 @@ Flags:
   --with-deps             With -Remove, also remove dependencies that are no longer
                           required by any installed package (never removes packages
                           installed explicitly)
-  --detail                With -Remove, list every file that would be deleted
+  --detail                Deprecated: -Remove now always lists every file
   --silence               Suppress tar extraction file listings
                           (faster on slow terminals)
   --isolate               With -Provide/-ReProvide/-LocalProvide: install into a
@@ -646,37 +646,97 @@ for _, d in ipairs({
   PROTECTED_DIRS[d] = true
 end
 
+-- ANSI colors for the removal progress line (mirrors commit.lua).
+local function wants_color()
+  local t = os.getenv("TERM")
+  if not t or t == "" or t == "dumb" then return false end
+  if os.getenv("NO_COLOR") then return false end
+  return true
+end
+local REM_COLOR = wants_color()
+local REM_C = {
+  reset = "\27[0m",
+  blue  = "\27[34m",
+  green = "\27[32m",
+  cyan  = "\27[36m",
+  dim   = "\27[2m",
+}
+local function rem_paint(color, s)
+  if not REM_COLOR then return s end
+  return REM_C[color] .. s .. REM_C.reset
+end
+
 -- Unlink the owned files of an entry, skipping unsafe paths, protected
 -- directories, and shared files, then prune now-empty parents.
-local function delete_files(files, pkg_name)
-  local root = config.get().root
+-- `owner_index` is a prebuilt db.file_owner_index(), so shared-file checks
+-- are O(1) lookups instead of full database rescans.
+-- Non-verbose TTY mode renders a live progress line (like install does);
+-- skip/verbose notes are buffered and flushed in one write afterwards.
+local function delete_files(files, pkg_name, owner_index)
+  local cfg = config.get()
+  local root = cfg.root
+  local verbose = cfg.verbose
+  local use_tty = spinner.enabled()
   local dirs = {}
   local seen = {}
+  local notes = {}
+  local total = #files
+  local done = 0
+  local show_progress = use_tty and not verbose and total > 0
+
   for _, rel in ipairs(files) do
     if rel == "" or rel == "." or rel:match("^/") or rel:match("^%.%.")
        or rel:match("%.%.%/") then
-      log.warn(("  skipping unsafe path %q"):format(rel))
+      notes[#notes + 1] = ("skipping unsafe path %q"):format(rel)
     else
       local p = path.join(root, rel)
       if PROTECTED_DIRS[p] then
-        log.detail(("  skipping protected directory %s"):format(rel))
-      elseif #db.other_owners(pkg_name, rel) > 0 then
-        log.detail(("  skipping %s (shared with %s)"):format(rel,
-          table.concat(db.other_owners(pkg_name, rel), ", ")))
+        notes[#notes + 1] = ("skipping protected directory %s"):format(rel)
       else
-        os.remove(p)
-        log.detail(("  removed %s"):format(rel))
-        local d = path.dirname(p)
-        while d ~= "/" and d ~= "." and not seen[d] do
-          seen[d] = true
-          if not PROTECTED_DIRS[d] then
-            dirs[#dirs + 1] = d
+        local others = db.other_owners(pkg_name, rel, owner_index)
+        if #others > 0 then
+          notes[#notes + 1] = ("skipping %s (shared with %s)"):format(
+            rel, table.concat(others, ", "))
+        else
+          os.remove(p)
+          if verbose then
+            notes[#notes + 1] = ("removed %s"):format(rel)
           end
-          d = path.dirname(d)
+          local d = path.dirname(p)
+          while d ~= "/" and d ~= "." and not seen[d] do
+            seen[d] = true
+            if not PROTECTED_DIRS[d] then
+              dirs[#dirs + 1] = d
+            end
+            d = path.dirname(d)
+          end
         end
       end
     end
+
+    done = done + 1
+    if show_progress then
+      io.write(("\r\27[K  [ removed %s | %s files ] %s"):format(
+        rem_paint("blue", tostring(done)),
+        rem_paint("cyan", tostring(total)),
+        rem_paint("dim", rel)))
+      io.flush()
+    end
   end
+
+  -- Final green count; replaces the live line.
+  if show_progress then
+    io.write(("\r\27[K  [ removed %s | %s files ]\n"):format(
+      rem_paint("green", tostring(total)),
+      rem_paint("cyan", tostring(total))))
+    io.flush()
+  end
+
+  -- Skips and verbose notes in a single write (no per-line redraws).
+  if #notes > 0 then
+    log.detail_batch(notes)
+  end
+
   table.sort(dirs, function(a, b)
     return #a > #b
   end)
@@ -836,15 +896,24 @@ function actions.remove(names, flags)
     removal_order, skipped = resolve_cascade(planned, targets)
   end
 
-  -- 5) Build the full removal plan.
+  -- 5) Build the full removal plan. One ownership index for the whole
+  -- transaction: every shared-file check becomes a hash lookup instead of a
+  -- full database rescan per file (which dominated removal time on large
+  -- packages).
+  local owner_index = db.file_owner_index()
+  local root = config.get().root
+
   local plan = {}
   for _, n in ipairs(removal_order) do
     local m = db.get(n)
     local files = db.files(n)
-    local shared = 0
+    local will_remove, will_keep = {}, {}
     for _, rel in ipairs(files) do
-      if #db.other_owners(n, rel) > 0 then
-        shared = shared + 1
+      local others = db.other_owners(n, rel, owner_index)
+      if #others > 0 then
+        will_keep[#will_keep + 1] = { rel = rel, others = others }
+      else
+        will_remove[#will_remove + 1] = rel
       end
     end
     plan[#plan + 1] = {
@@ -852,7 +921,9 @@ function actions.remove(names, flags)
       version = m and m.version or "?",
       kind = db.kind(n),
       files = files,
-      shared = shared,
+      will_remove = will_remove,
+      will_keep = will_keep,
+      shared = #will_keep,
       dependents = remaining_dependents(n, planned),
     }
   end
@@ -861,29 +932,32 @@ function actions.remove(names, flags)
     return 0
   end
 
-  -- 6) Print the plan (mirrors -Provide).
-  print("")
+  -- 6) Print the plan: a package header plus every file that will actually
+  -- change (mirrors "will provide" lines). Shared files are listed as keep --
+  -- they survive the removal. The whole listing is built as one string and
+  -- printed in a single write: thousands of print() calls would drag on slow
+  -- terminals, the same reason install output is batched.
+  local listing = {}
   for _, e in ipairs(plan) do
-    local count = #e.files == 1 and "1 file" or (#e.files .. " files")
-    local note = count
-    if e.shared > 0 then
-      note = note .. (", %d shared kept"):format(e.shared)
+    listing[#listing + 1] = ("  will remove %s-%s"):format(e.name, e.version)
+    for _, rel in ipairs(e.will_remove) do
+      listing[#listing + 1] = ("      will remove %s"):format(path.join(root, rel))
     end
-    print(("  will remove %s-%s (%s)"):format(e.name, e.version, note))
-    if flags.detail then
-      for _, rel in ipairs(e.files) do
-        print(("      %s"):format(rel))
-      end
+    for _, k in ipairs(e.will_keep) do
+      listing[#listing + 1] = ("      keep %s (also owned by %s)"):format(
+        path.join(root, k.rel), table.concat(k.others, ", "))
     end
     if #e.dependents > 0 then
-      print(("    !! removing %s breaks: %s"):format(
-        e.name, table.concat(e.dependents, ", ")))
+      listing[#listing + 1] = ("    !! removing %s breaks: %s"):format(
+        e.name, table.concat(e.dependents, ", "))
     end
   end
   for dep, rd in pairs(skipped) do
-    print(("  keep %s (still required by %s)"):format(
-      dep, table.concat(rd, ", ")))
+    listing[#listing + 1] = ("  keep %s (still required by %s)"):format(
+      dep, table.concat(rd, ", "))
   end
+  print("")
+  print(table.concat(listing, "\n"))
   print("")
 
   -- 7) Single confirmation, default NO.
@@ -897,7 +971,7 @@ function actions.remove(names, flags)
   for _, e in ipairs(plan) do
     local m = db.get(e.name)
     log.step(("removing %s-%s (%d files)"):format(e.name, e.version, #e.files))
-    delete_files(e.files, e.name)
+    delete_files(e.files, e.name, owner_index)
     db.remove(e.name)
     for _, d in ipairs(m and m.deps or {}) do
       db.remove_dependent(d, e.name)

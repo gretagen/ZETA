@@ -262,8 +262,17 @@ end
 -- Return a list of installed packages (excluding `name`) that also list
 -- `file` in their files list. Used by -Remove to decide whether a shared
 -- file can safely be deleted.
-function db.other_owners(name, file)
+-- `index` is an optional prebuilt db.file_owner_index(): passing it turns
+-- the call into an O(1) lookup instead of a full database rescan.
+function db.other_owners(name, file, index)
   local others = {}
+  if index then
+    for n in pairs(index[file] or {}) do
+      if n ~= name then others[#others + 1] = n end
+    end
+    table.sort(others)
+    return others
+  end
   for _, n in ipairs(db.list()) do
     if n ~= name then
       local files = db.files(n)
@@ -276,6 +285,23 @@ function db.other_owners(name, file)
     end
   end
   return others
+end
+
+-- One-pass ownership map: rel path -> { pkg = true, ... }.
+-- -Remove builds this once per transaction; checking thousands of files then
+-- costs a single hash lookup each instead of rescanning every package's file
+-- list per file (which dominated removal time on large packages).
+function db.file_owner_index()
+  ensure_migrated()
+  local index = {}
+  for _, n in ipairs(db.list()) do
+    for _, f in ipairs(db.files(n)) do
+      local e = index[f]
+      if not e then e = {}; index[f] = e end
+      e[n] = true
+    end
+  end
+  return index
 end
 
 -- ---------------------------------------------------------------------------

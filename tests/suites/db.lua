@@ -186,4 +186,33 @@ suite:test("db.get on a corrupt meta file returns nil", function()
   lib.assert_nil(db.get("broken"))
 end)
 
+suite:test("file_owner_index maps files to their owners", function()
+  fresh()
+  db.record("a", meta("a"), { "usr/bin/a", "usr/lib/shared.so" })
+  db.record("b", meta("b"), { "usr/bin/b", "usr/lib/shared.so" })
+  local index = db.file_owner_index()
+
+  lib.assert_eq(db.other_owners("a", "usr/bin/a", index), {}, "private file has no other owners")
+  lib.assert_eq(db.other_owners("a", "usr/lib/shared.so", index), { "b" }, "shared file lists b")
+  lib.assert_eq(db.other_owners("a", "never-tracked", index), {}, "untracked file has no owners")
+  -- Parity with the non-indexed rescan path.
+  lib.assert_eq(db.other_owners("a", "usr/lib/shared.so", index),
+    db.other_owners("a", "usr/lib/shared.so"), "index path matches scan path")
+end)
+
+suite:test("file_owner_index is a snapshot that must be rebuilt after removals", function()
+  fresh()
+  db.record("a", meta("a"), { "usr/lib/shared.so" })
+  db.record("b", meta("b"), { "usr/lib/shared.so" })
+  local index = db.file_owner_index()
+  lib.assert_eq(db.other_owners("a", "usr/lib/shared.so", index), { "b" })
+
+  db.remove("b")
+  local rebuilt = db.file_owner_index()
+  lib.assert_eq(db.other_owners("a", "usr/lib/shared.so", rebuilt), {},
+    "rebuilt index drops the removed owner")
+  lib.assert_eq(db.other_owners("a", "usr/lib/shared.so", index), { "b" },
+    "old index is an immutable snapshot")
+end)
+
 return suite
