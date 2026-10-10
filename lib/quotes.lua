@@ -44,6 +44,7 @@ local quotes = {
     "To delete is to make room for the new.",
     "A reminder to frequently create generations in case something breaks.",
     "Dividing packages by 0",
+    "[[Hyperlink Blocked]].",
     "Returning void because nothing is left behind.",
   },
   forget = {

@@ -37,6 +37,7 @@ Commands:
   -Remove <pkg>...        Remove installed packages (see --with-deps)
   -List                   List installed packages and dependencies
   -Localize <query>       Search the remote repository index for <query>
+                          (shows the repository each package is served from)
   -Test <pkg>             Verify <pkg> offline WITHOUT installing it
   -Forget                 Remove all cached packages
   -Help                   Show this help
@@ -562,10 +563,30 @@ function actions.localize(query)
 		log.info(("no packages match %q"):format(query))
 		return 0
 	end
-	print(("%-20s %-16s %s"):format("PACKAGE", "VERSION", "SUMMARY"))
-	print(string.rep("-", 70))
+
+	-- Newer indexes carry a per-entry `origin`. When absent (older index),
+	-- resolve it from each package's manifest url in one batched pass so the
+	-- REPO column is always filled.
+	local missing = {}
 	for _, m in ipairs(matches) do
-		print(("%-20s %-16s %s"):format(m.name, m.version or "?", m.summary or ""))
+		if not m.origin or m.origin == "" then
+			missing[#missing + 1] = m.name
+		end
+	end
+	if #missing > 0 then
+		local resolved = repo.origins(missing)
+		for _, m in ipairs(matches) do
+			if not m.origin or m.origin == "" then
+				m.origin = resolved[m.name] or "unknown"
+			end
+		end
+	end
+
+	print(("%-20s %-16s %-12s %s"):format("PACKAGE", "VERSION", "REPO", "SUMMARY"))
+	print(string.rep("-", 84))
+	for _, m in ipairs(matches) do
+		print(("%-20s %-16s %-12s %s"):format(
+			m.name, m.version or "?", m.origin or "unknown", m.summary or ""))
 	end
 	return 0
 end

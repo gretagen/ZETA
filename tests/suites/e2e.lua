@@ -100,6 +100,13 @@ local rep_tar, rep_sha = make_payload("repacked", { ["usr/bin/repacked"] = "#!/b
 repo_write("repacked/package.lua",
   "return { name='repacked', version='1.0', url='" .. file_url(rep_tar) .. "', sha256='"
     .. rep_sha .. "', deps={}, archive={strip=1} }\n")
+
+-- fallback: present in the index WITHOUT an origin, so -Localize must derive
+-- the repository from its manifest url (a local file:// here).
+repo_write("fallback/package.lua",
+  "return { name='fallback', version='1.0', summary='origin fallback', url='"
+    .. file_url(path.join(PKG, "hello", "hello-1.0.tar.gz")) .. "', sha256='"
+    .. string.rep("0", 64) .. "', deps={}, archive={strip=1} }\n")
 repo_write("index.lua",
   "return { {name='hello',version='1.0',summary='demo'}, {name='libz',version='1.3.1',summary='lib'}, "
     .. "{name='app',version='1.0',summary='needs hello'}, {name='app2',version='1.0',summary='needs app'}, "
@@ -128,13 +135,14 @@ repo_write("shared2/package.lua",
 
 -- Update index to include new packages
 repo_write("index.lua",
-  "return { {name='hello',version='1.0',summary='demo'}, {name='libz',version='1.3.1',summary='lib'}, "
+  "return { {name='hello',version='1.0',summary='demo',origin='constructs'}, {name='libz',version='1.3.1',summary='lib'}, "
     .. "{name='app',version='1.0',summary='needs hello'}, {name='app2',version='1.0',summary='needs app'}, "
     .. "{name='app3',version='1.0',summary='needs hello'}, {name='evil',version='1.0'}, {name='badsha',version='1.0'}, "
     .. "{name='upgradable',version='2.0',summary='upgrade test'}, "
     .. "{name='shared1',version='1.0',summary='shared file test'}, "
     .. "{name='shared2',version='1.0',summary='shared file test 2'}, "
-    .. "{name='repacked',version='1.0',summary='in-place repack test'} }\n")
+    .. "{name='repacked',version='1.0',summary='in-place repack test'}, "
+    .. "{name='fallback',version='1.0',summary='origin fallback'} }\n")
 
 -- ---------------------------------------------------------------------------
 -- Runner helpers
@@ -194,6 +202,22 @@ suite:test("-Localize searches the remote index", function()
   local code, out = lib.run_zeta({ "-Localize", "hello" }, fresh_env())
   lib.assert_eq(code, 0)
   lib.assert_contains(out, "hello")
+end)
+
+suite:test("-Localize shows the repository each package comes from", function()
+  local code, out = lib.run_zeta({ "-Localize", "demo" }, fresh_env())
+  lib.assert_eq(code, 0)
+  lib.assert_contains(out, "REPO")
+  lib.assert_contains(out, "hello")
+  lib.assert_contains(out, "constructs")
+end)
+
+suite:test("-Localize derives the repository from the manifest when the index omits it", function()
+  local code, out = lib.run_zeta({ "-Localize", "fallback" }, fresh_env())
+  lib.assert_eq(code, 0)
+  lib.assert_contains(out, "fallback")
+  -- the fixture manifest has a file:// url, so the derived origin is "local"
+  lib.assert_contains(out, "local")
 end)
 
 suite:test("-Provide installs from the remote repository", function()

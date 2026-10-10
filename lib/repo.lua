@@ -67,6 +67,8 @@ function repo.fetch_index()
         name = entry.name,
         version = type(entry.version) == "string" and entry.version or nil,
         summary = type(entry.summary) == "string" and entry.summary or nil,
+        -- Optional artifact repository label (newer indexes); nil when absent.
+        origin = type(entry.origin) == "string" and entry.origin ~= "" and entry.origin or nil,
       }
     end
   end
@@ -86,6 +88,74 @@ function repo.search(query)
     end
   end
   return matches
+end
+
+-- Map an artifact `url` to a short, lowercase origin label: the repository
+-- the payload actually lives in. Most urls carry a "zeta-<repo>" segment
+-- (github.com/gretagen/zeta-providence/..., files.spectoria.dev/zeta-monsters/...).
+-- A manifest without a url is a metapackage; anything that isn't a local or
+-- gretagen-hosted artifact is reported by host (or "upstream" for GitHub).
+function repo.origin_from_url(url)
+  if type(url) ~= "string" or url == "" then
+    return "meta"
+  end
+  local z = url:match("zeta%-([%w_]+)")
+  if z then return z:lower() end
+  if url:match("^file://") or url:match("^/")
+     or not url:match("^%a[%w+.-]*://") then
+    return "local"
+  end
+  if url:match("github%.com") then
+    return "upstream"
+  end
+  local host = url:match("^%a[%w+.-]*://([^/@]+)")
+  if host and host ~= "" then
+    return (host:gsub("^www%.", "")):lower()
+  end
+  return "unknown"
+end
+
+-- Resolve artifact-repository origins for a list of package names by
+-- downloading each package.lua and mapping its `url`. Only needed when the
+-- index predates the `origin` field. Downloads run in parallel; names that
+-- cannot be resolved map to "unknown" (never an error -- -Localize must still
+-- print its results). Returns a map name -> label.
+function repo.origins(names)
+  local out = {}
+  local items = {}
+  local seen = {}
+  local tmp = config.get().tmp_dir
+  for _, raw_name in ipairs(names) do
+    local name = path.sanitize_name(raw_name)
+    if name and not seen[name] then
+      seen[name] = true
+      items[#items + 1] = {
+        name = name,
+        url = repo.manifest_url(name),
+        dest = path.join(tmp, "origin-" .. name .. ".lua"),
+        label = name,
+      }
+    end
+  end
+  if #items == 0 then return out end
+
+  local results = fetch.get_parallel(items, { label = "resolving origins (%d)" })
+  for i, item in ipairs(items) do
+    local label = "unknown"
+    local r = results[i]
+    if r and r.dest then
+      local f = io.open(r.dest, "rb")
+      local src
+      if f then src = f:read("*a"); f:close() end
+      os.remove(r.dest)
+      if src then
+        local m = manifest.load_string(src, item.url)
+        if m then label = repo.origin_from_url(m.url) end
+      end
+    end
+    out[item.name] = label
+  end
+  return out
 end
 
 return repo

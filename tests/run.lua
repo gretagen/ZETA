@@ -18,7 +18,7 @@ package.path = package.path .. ";" .. repo_root .. "/lib/?.lua;" .. repo_root ..
 local lib = require("lib")
 
 local ALL_SUITES = {
-  "vercmp", "sha256", "path", "cli", "sandbox", "manifest",
+  "vercmp", "sha256", "path", "cli", "sandbox", "manifest", "repo",
   "config", "deps", "fetch", "spinner", "archive", "checksum", "packages", "db", "commit", "hooks", "isolate", "quotes", "e2e",
 }
 
