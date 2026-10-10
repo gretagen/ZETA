@@ -604,11 +604,26 @@ function actions.localize(query)
 		end
 	end
 
-	print(("%-20s %-16s %-12s %s"):format("PACKAGE", "VERSION", "REPO", "SUMMARY"))
-	print(string.rep("-", 84))
+	-- Size columns to the actual rows: package names (e.g.
+	-- nix-declarative-helper) and repository labels (e.g. declarative-plugins)
+	-- can exceed the historical fixed widths, which would push SUMMARY out of
+	-- line.
+	local rows = {}
 	for _, m in ipairs(matches) do
-		print(("%-20s %-16s %-12s %s"):format(
-			m.name, m.version or "?", m.origin or "unknown", m.summary or ""))
+		rows[#rows + 1] = { m.name, m.version or "?", m.origin or "unknown", m.summary or "" }
+	end
+	local widths = { #"PACKAGE", #"VERSION", #"REPO" }
+	for _, r in ipairs(rows) do
+		for i = 1, 3 do
+			if #r[i] > widths[i] then widths[i] = #r[i] end
+		end
+	end
+	local fmt = ("%%-%ds %%-%ds %%-%ds %%s"):format(widths[1], widths[2], widths[3])
+	local header = fmt:format("PACKAGE", "VERSION", "REPO", "SUMMARY")
+	print(header)
+	print(string.rep("-", math.max(#header, 84)))
+	for _, r in ipairs(rows) do
+		print(fmt:format(r[1], r[2], r[3], r[4]))
 	end
 	return 0
 end

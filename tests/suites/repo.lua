@@ -57,6 +57,18 @@ suite:test("origin_from_url handles releases and non-github hosts", function()
     "upstream")
 end)
 
+suite:test("origin_from_url labels gretagen repos that lack a zeta- prefix", function()
+  lib.assert_eq(repo.origin_from_url(
+    "https://raw.githubusercontent.com/gretagen/declarative-plugins/refs/heads/main/packages/nix-declarative-helper/nix-declarative-helper-1.3.tar.gz"),
+    "declarative-plugins")
+  lib.assert_eq(repo.origin_from_url(
+    "https://github.com/gretagen/declarative-plugins/releases/download/v1/x.tar.gz"),
+    "declarative-plugins")
+  lib.assert_eq(repo.origin_from_url(
+    "https://raw.githubusercontent.com/gretagen/some-new-repo/x.tar.gz"),
+    "some-new-repo")
+end)
+
 suite:test("origin_from_url falls back for meta, local and unknown hosts", function()
   lib.assert_eq(repo.origin_from_url(nil), "meta")
   lib.assert_eq(repo.origin_from_url(""), "meta")
@@ -121,13 +133,19 @@ return { name = "beta", version = "1.0", summary = "b",
   url = "https://files.spectoria.dev/zeta-monsters/beta.tar.gz",
   sha256 = "%s", deps = {}, archive = { strip = 1 } }
 ]]):format(SHA))
+  write(path.join(dir, "packages/delta/package.lua"), ([[
+return { name = "delta", version = "1.0", summary = "d",
+  url = "https://raw.githubusercontent.com/gretagen/declarative-plugins/refs/heads/main/packages/delta/delta.tar.gz",
+  sha256 = "%s", deps = {}, archive = { strip = 1 } }
+]]):format(SHA))
   -- metapackage: no url
   write(path.join(dir, "packages/meta1/package.lua"),
     [[return { name = "meta1", version = "1.0", summary = "m", install = function() end }]])
 
-  local map = repo.origins({ "alpha", "beta", "meta1", "missing" })
+  local map = repo.origins({ "alpha", "beta", "delta", "meta1", "missing" })
   lib.assert_eq(map.alpha, "providence")
   lib.assert_eq(map.beta, "monsters")
+  lib.assert_eq(map.delta, "declarative-plugins")
   lib.assert_eq(map.meta1, "meta")
   lib.assert_eq(map.missing, "unknown", "unfetchable manifest falls back to unknown")
 end)

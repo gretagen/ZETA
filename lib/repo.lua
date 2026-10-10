@@ -136,10 +136,12 @@ function repo.search(query)
 end
 
 -- Map an artifact `url` to a short, lowercase origin label: the repository
--- the payload actually lives in. Most urls carry a "zeta-<repo>" segment
--- (github.com/gretagen/zeta-providence/..., files.spectoria.dev/zeta-monsters/...).
--- A manifest without a url is a metapackage; anything that isn't a local or
--- gretagen-hosted artifact is reported by host (or "upstream" for GitHub).
+-- the payload actually lives in. A "zeta-<repo>" segment (present in both
+-- github.com/gretagen/zeta-providence/... and files.spectoria.dev/zeta-monsters/...)
+-- maps to <repo>. Other GitHub repositories owned by gretagen map to their
+-- repository name (e.g. declarative-plugins); GitHub repositories owned by
+-- anyone else are "upstream". A manifest without a url is a metapackage;
+-- non-GitHub hosts are reported by host.
 function repo.origin_from_url(url)
   if type(url) ~= "string" or url == "" then
     return "meta"
@@ -150,7 +152,16 @@ function repo.origin_from_url(url)
      or not url:match("^%a[%w+.-]*://") then
     return "local"
   end
-  if url:match("github%.com") then
+  -- GitHub raw/release URLs: gretagen's own repos are labelled by repository
+  -- name (stripping a "zeta-" prefix when present); other owners are upstream.
+  local owner, rname = url:match("^https?://raw%.githubusercontent%.com/([^/]+)/([^/#?]+)")
+  if not owner then
+    owner, rname = url:match("^https?://[^/]*github%.com/([^/]+)/([^/#?]+)")
+  end
+  if owner then
+    if owner:lower() == "gretagen" and rname and rname ~= "" then
+      return (rname:gsub("^zeta%-", "")):lower()
+    end
     return "upstream"
   end
   local host = url:match("^%a[%w+.-]*://([^/@]+)")
