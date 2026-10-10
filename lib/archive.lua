@@ -75,7 +75,7 @@ function archive.entries(archive_file)
         end
         local rel = rel_of(info.name)
         if rel ~= "" then
-          entries[#entries + 1] = { path = rel, type = typ, target = target }
+          entries[#entries + 1] = { path = rel, type = typ, target = target, raw = info.name }
         end
       end
     end
@@ -162,6 +162,31 @@ function archive.validate(entries)
   return true
 end
 
+-- Reject members that would land as BARE files at the destination root once
+-- `strip` leading path components are removed. GNU tar's --strip-components
+-- consumes the first `strip` components of each member name, so any regular
+-- file or symlink whose raw name has `strip` or fewer path separators would
+-- extract as a top-level file straight into the destination root (the
+-- lead-in `./` counts as one component). This is exactly how perl-5.42.3's
+-- 962 stray Pod::Man pages (*.0) ended up installed into /. Directories at
+-- that depth are the stripped top-level directory itself and are allowed.
+-- Source-tarball unpacking passes strip=0 (see `p:unpack`) and is exempt.
+-- Returns true or nil, err. Set opts.allow_root_files on extract to opt out.
+local function check_root_files(entries, strip)
+  if strip < 1 then return true end
+  local separators = function(name)
+    local n = 0
+    for _ in name:gmatch("/") do n = n + 1 end
+    return n
+  end
+  for _, e in ipairs(entries) do
+    if e.type ~= "dir" and separators(e.raw or e.path) <= strip then
+      return nil, ("archive member %q would extract as a top-level file at the destination root"):format(e.path)
+    end
+  end
+  return true
+end
+
 -- Extract `archive_file` into `dest`. Returns the validated entries, or
 -- nil, err if validation or extraction fails. Dispatches on the archive's
 -- own filename so format-specific handling (deb payloads, Arch metadata)
@@ -189,6 +214,10 @@ function archive.extract_tar(archive_file, dest, opts)
   if not entries then return nil, err end
   local ok, verr = archive.validate(entries)
   if not ok then return nil, verr end
+  if not opts.allow_root_files then
+    local rok, rerr = check_root_files(entries, opts.strip or 0)
+    if not rok then return nil, rerr end
+  end
   local strip = opts.strip or 0
   -- --silence opts out of the -v member listing; verbose extraction is the
   -- default so users see what is being installed.

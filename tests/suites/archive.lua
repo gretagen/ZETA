@@ -240,4 +240,57 @@ suite:test(".pkg.tar.zst validates its members like any tar", function()
   lib.assert_eq(archive.validate(entries), true)
 end)
 
+-- Root-clutter guard: with strip>0, a regular file at (or shallower than) the
+-- stripped depth would extract as a bare top-level file into the destination
+-- root — the perl-5.42.3 regression (962 Pod::Man *.0 pages landed in /).
+-- The construct tarballs use `./`-prefixed members (tar -C <stage> .), so the
+-- `/ .` lead-in is itself the single stripped component.
+suite:test("rejects top-level file member with strip", function()
+  local base = lib.tmpdir("arch-rootfile")
+  lib.write(path.join(base, "zipdetails.0"), "pod page")
+  local out = path.join(base, "s.tar.gz")
+  os.execute("tar -czf " .. path.quote(out) .. " -C " .. path.quote(base) .. " . 2>/dev/null")
+  local dir = lib.tmpdir("arch-rootfile-dst")
+  local ok, err = archive.extract(out, dir, { strip = 1 })
+  lib.assert_nil(ok)
+  lib.assert_contains(err, "root")
+  lib.assert_false(lib.exists(path.join(dir, "zipdetails.0")))
+end)
+
+suite:test("rejects file left bare at the root after strip", function()
+  local base = lib.tmpdir("arch-shallow")
+  local out = path.join(base, "s.tar.gz")
+  os.execute("mkdir -p " .. path.quote(base .. "/top"))
+  lib.write(path.join(base, "top/stray.0"), "x")
+  os.execute("tar -czf " .. path.quote(out) .. " -C " .. path.quote(base) .. " top 2>/dev/null")
+  local dir = lib.tmpdir("arch-shallow-dst")
+  local ok, err = archive.extract(out, dir, { strip = 1 })
+  lib.assert_nil(ok)
+  lib.assert_contains(err, "root")
+end)
+
+suite:test("allows the sanitized construct layout after strip", function()
+  local base = lib.tmpdir("arch-clean-layout")
+  local out = path.join(base, "s.tar.gz")
+  os.execute("mkdir -p " .. path.quote(base .. "/top/usr/bin"))
+  lib.write(path.join(base, "top/usr/bin/x"), "x")
+  os.execute("tar -czf " .. path.quote(out) .. " -C " .. path.quote(base) .. " top 2>/dev/null")
+  local dir = lib.tmpdir("arch-clean-layout-dst")
+  local ok, err = archive.extract(out, dir, { strip = 1 })
+  lib.assert_true(ok ~= nil, tostring(err))
+  lib.assert_true(lib.exists(path.join(dir, "usr/bin/x")))
+  lib.assert_false(lib.exists(path.join(dir, "top")))
+end)
+
+suite:test("allow_root_files opts out of the root-file guard", function()
+  local base = lib.tmpdir("arch-optout")
+  lib.write(path.join(base, "stray.0"), "content")
+  local out = path.join(base, "s.tar.gz")
+  os.execute("tar -czf " .. path.quote(out) .. " -C " .. path.quote(base) .. " . 2>/dev/null")
+  local dir = lib.tmpdir("arch-optout-dst")
+  local ok, err = archive.extract(out, dir, { strip = 1, allow_root_files = true })
+  lib.assert_true(ok ~= nil, tostring(err))
+  lib.assert_true(lib.exists(path.join(dir, "stray.0")))
+end)
+
 return suite
