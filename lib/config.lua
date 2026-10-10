@@ -5,6 +5,13 @@
 --
 -- ZETA_ROOT is how Zeta stays "rooted" and testable: point it at a scratch
 -- directory and every install, database write, and removal happens under it.
+--
+-- The client can consult several remote repositories at once. `repos` is the
+-- resolved consultation list (first hit wins) and comes from, in order:
+-- the ZETA_REPOS env var (space-separated URLs), the ZETA_REPO env var
+-- (single URL, kept so existing setups keep working), a `repos = { ... }`
+-- table in the config file, or a single `repo = "..."` string there.
+-- Defaults to the single zeta-index repository.
 
 local config = {}
 
@@ -59,6 +66,35 @@ local function resolve_local_packages(root, under, cfg_file)
   return sys
 end
 
+-- Resolve the remote repository list. Precedence:
+--   ZETA_REPOS (env, space-separated) > ZETA_REPO (env, single) >
+--   config file repos (list) > config file repo (single) > default.
+local function resolve_repos(cfg_file)
+  local list = getenv("ZETA_REPOS")
+  if list and list ~= "" then
+    local repos = {}
+    for url in list:gmatch("%S+") do
+      if url ~= "" then repos[#repos + 1] = url end
+    end
+    if #repos > 0 then return repos end
+  end
+  local single = getenv("ZETA_REPO")
+  if single and single ~= "" then return { single } end
+  if cfg_file then
+    if type(cfg_file.repos) == "table" then
+      local repos = {}
+      for _, url in ipairs(cfg_file.repos) do
+        if type(url) == "string" and url ~= "" then repos[#repos + 1] = url end
+      end
+      if #repos > 0 then return repos end
+    end
+    if type(cfg_file.repo) == "string" and cfg_file.repo ~= "" then
+      return { cfg_file.repo }
+    end
+  end
+  return { "https://github.com/gretagen/zeta-index" }
+end
+
 function config.load(script_dir)
   if script_dir then _script_dir = script_dir end
 
@@ -74,9 +110,11 @@ function config.load(script_dir)
   end
 
   -- Layer 3: Build full config table with env > file > defaults.
+  local repos = resolve_repos(cfg_file)
   _cfg = {
     root = root,
-    repo = getenv("ZETA_REPO") or (cfg_file and cfg_file.repo) or "https://github.com/gretagen/zeta-index",
+    repos = repos,
+    repo = repos[1],
     local_packages = resolve_local_packages(root, under, cfg_file),
     cache_dir = getenv("ZETA_CACHE") or (cfg_file and cfg_file.cache_dir) or under("var/cache/zeta"),
     state_dir = getenv("ZETA_STATE") or (cfg_file and cfg_file.state_dir) or under("var/db/zeta"),

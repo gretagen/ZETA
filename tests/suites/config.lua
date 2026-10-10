@@ -83,4 +83,50 @@ suite:test("reset clears the cached script dir", function()
   lib.assert_eq(cfg.local_packages, path.join(root, "usr/share/packages"))
 end)
 
+-- Remote repository list. The client consults every configured repository in
+-- order; ZETA_REPOS (space-separated) is the list form, ZETA_REPO the
+-- single-URL form kept for back-compat.
+
+suite:test("ZETA_REPOS splits into the repository list", function()
+  config.reset()
+  config.setenv("ZETA_ROOT", lib.tmpdir("cfg-root"))
+  config.setenv("ZETA_REPOS", "/repo/a /repo/b /repo/c")
+  local cfg = config.load()
+  lib.assert_eq(#cfg.repos, 3)
+  lib.assert_eq(cfg.repos[1], "/repo/a")
+  lib.assert_eq(cfg.repos[2], "/repo/b")
+  lib.assert_eq(cfg.repos[3], "/repo/c")
+  lib.assert_eq(cfg.repo, "/repo/a")
+end)
+
+suite:test("ZETA_REPO wraps into a single-element list", function()
+  config.reset()
+  config.setenv("ZETA_ROOT", lib.tmpdir("cfg-root"))
+  config.setenv("ZETA_REPO", "/repo/only")
+  local cfg = config.load()
+  lib.assert_eq(#cfg.repos, 1)
+  lib.assert_eq(cfg.repos[1], "/repo/only")
+  lib.assert_eq(cfg.repo, "/repo/only")
+end)
+
+suite:test("ZETA_REPOS beats ZETA_REPO", function()
+  config.reset()
+  config.setenv("ZETA_ROOT", lib.tmpdir("cfg-root"))
+  config.setenv("ZETA_REPO", "/repo/old")
+  config.setenv("ZETA_REPOS", "/repo/one /repo/two")
+  local cfg = config.load()
+  lib.assert_eq(#cfg.repos, 2)
+  lib.assert_eq(cfg.repos[1], "/repo/one")
+  lib.assert_eq(cfg.repos[2], "/repo/two")
+end)
+
+suite:test("repos defaults to the single zeta-index repository", function()
+  config.reset()
+  config.setenv("ZETA_ROOT", lib.tmpdir("cfg-root"))
+  local cfg = config.load()
+  lib.assert_eq(#cfg.repos, 1)
+  lib.assert_eq(cfg.repos[1], "https://github.com/gretagen/zeta-index")
+  lib.assert_eq(cfg.repo, "https://github.com/gretagen/zeta-index")
+end)
+
 return suite

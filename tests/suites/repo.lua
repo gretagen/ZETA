@@ -145,4 +145,124 @@ return { name = "alpha", version = "1.0", summary = "a",
   lib.assert_nil(map["../evil"], "invalid names are dropped")
 end)
 
+
+-- ---------------------------------------------------------------------------
+-- multi-repository resolution
+-- ---------------------------------------------------------------------------
+-- Build a repository tree: <root>/packages/<name>/package.lua (+ index.lua).
+local function make_repo(prefix, pkgs, index)
+  local root = lib.tmpdir(prefix)
+  for name, manifest in pairs(pkgs) do
+    local dir = path.join(root, "packages", name)
+    os.execute("mkdir -p " .. path.quote(dir))
+    lib.write(path.join(dir, "package.lua"), manifest)
+  end
+  if index then
+    lib.write(path.join(root, "packages", "index.lua"), index)
+  end
+  return root
+end
+
+local function entry(name, version, summary)
+  return ("return { name=%q, version=%q, url=\"https://example.invalid/%s-%s.tar.gz\", "
+    .. "sha256=\"%s\", deps={}, archive={strip=1} }\n")
+    :format(name, version, name, version, string.rep("0", 64))
+end
+
+-- REPO1 is consulted first and shadows REPO2 on the shared name.
+local REPO1 = make_repo("repo-one", {
+  alpha = entry("alpha", "1.0"),
+  shared = entry("shared", "1.0"),
+}, "return { {name='alpha',version='1.0',summary='from repo 1'}, "
+  .. "{name='shared',version='1.0',summary='from repo 1'} }\n")
+
+local REPO2 = make_repo("repo-two", {
+  beta = entry("beta", "2.0"),
+  shared = entry("shared", "9.9"),
+}, "return { {name='beta',version='2.0',summary='from repo 2'}, "
+  .. "{name='shared',version='9.9',summary='from repo 2'} }\n")
+
+-- Point the client at the two repositories and reset cached config.
+local function use_repos(...)
+  config.reset()
+  config.setenv("ZETA_ROOT", lib.tmpdir("repo-root"))
+  config.setenv("ZETA_STATE", lib.tmpdir("repo-state"))
+  config.setenv("ZETA_CACHE", lib.tmpdir("repo-cache"))
+  config.setenv("ZETA_TMP", lib.tmpdir("repo-tmp"))
+  local repos = {}
+  for _, r in ipairs({ ... }) do repos[#repos + 1] = r end
+  config.setenv("ZETA_REPOS", table.concat(repos, " "))
+  return repos
+end
+
+suite:test("fetch_manifest finds a package in the first repository", function()
+  use_repos(REPO1, REPO2)
+  local m = repo.fetch_manifest("alpha")
+  lib.assert_true(m ~= nil)
+  lib.assert_eq(m.version, "1.0")
+end)
+
+suite:test("fetch_manifest falls through to a later repository", function()
+  use_repos(REPO1, REPO2)
+  local m = repo.fetch_manifest("beta")
+  lib.assert_true(m ~= nil, "beta should resolve from the second repository")
+  lib.assert_eq(m.version, "2.0")
+end)
+
+suite:test("an earlier repository shadows a later one", function()
+  use_repos(REPO1, REPO2)
+  local m = repo.fetch_manifest("shared")
+  lib.assert_eq(m.version, "1.0")
+end)
+
+suite:test("fetch_manifest reports when no repository has the package", function()
+  use_repos(REPO1, REPO2)
+  local m, err = repo.fetch_manifest("ghost")
+  lib.assert_nil(m)
+  lib.assert_contains(err, "configured repositories")
+end)
+
+suite:test("fetch_index merges the indexes of every repository", function()
+  use_repos(REPO1, REPO2)
+  local list = repo.fetch_index()
+  lib.assert_true(list ~= nil)
+  local versions = {}
+  for _, e in ipairs(list) do versions[e.name] = e.version end
+  lib.assert_eq(versions.alpha, "1.0")
+  lib.assert_eq(versions.beta, "2.0")
+end)
+
+suite:test("fetch_index keeps the first repository's entry for a shared name", function()
+  use_repos(REPO1, REPO2)
+  local list = repo.fetch_index()
+  local found
+  for _, e in ipairs(list) do
+    if e.name == "shared" then found = e break end
+  end
+  lib.assert_true(found ~= nil, "shared missing from merged index")
+  lib.assert_eq(found.version, "1.0")
+  lib.assert_eq(found.summary, "from repo 1")
+end)
+
+suite:test("search spans every repository", function()
+  use_repos(REPO1, REPO2)
+  local matches = repo.search("beta")
+  lib.assert_eq(#matches, 1)
+  lib.assert_eq(matches[1].name, "beta")
+end)
+
+suite:test("a single ZETA_REPO still resolves (back-compat)", function()
+  config.reset()
+  config.setenv("ZETA_ROOT", lib.tmpdir("repo-root"))
+  config.setenv("ZETA_STATE", lib.tmpdir("repo-state"))
+  config.setenv("ZETA_CACHE", lib.tmpdir("repo-cache"))
+  config.setenv("ZETA_TMP", lib.tmpdir("repo-tmp"))
+  config.setenv("ZETA_REPO", REPO2)
+  local m = repo.fetch_manifest("beta")
+  lib.assert_true(m ~= nil)
+  lib.assert_eq(m.version, "2.0")
+  local missing = repo.fetch_manifest("alpha")
+  lib.assert_nil(missing)
+end)
+
 return suite

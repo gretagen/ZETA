@@ -67,7 +67,10 @@ Configuration:
 
   Example /etc/zeta/configuration.lua:
     return {
-      repo = "https://github.com/gretagen/zeta-index",
+      repos = {
+        "https://github.com/gretagen/zeta-index",
+        "https://github.com/gretagen/declarative-plugins",
+      },
       root = "/",
       verbose = false,
       quotes = false,
@@ -80,7 +83,8 @@ Installed state is tracked in three registries under /var/db/zeta:
 
 Environment:
   ZETA_ROOT            Filesystem root packages are installed into   (default: /)
-  ZETA_REPO            Remote repository base URL (github.com served via    (default: https://github.com/gretagen/zeta-index)
+  ZETA_REPOS           Remote repository URLs, space-separated, tried in order  (default: https://github.com/gretagen/zeta-index)
+  ZETA_REPO            Single remote repo base URL (one-entry ZETA_REPOS)  (default: https://github.com/gretagen/zeta-index)
                        raw.githubusercontent.com)
   ZETA_LOCAL_PACKAGES  Local /packages tree                          (default: /usr/share/packages)
   ZETA_CACHE           Download cache                                (default: $ZETA_ROOT/var/cache/zeta)
@@ -218,6 +222,24 @@ function actions._install(name, flags, opts)
 										queue[#queue + 1] = dep.name
 									end
 								end
+							end
+						end
+					end
+				end
+			end
+			-- Multi-repo: the parallel prefetch only knows the first
+			-- repository, so any package that lives in a later one (or a
+			-- local tree) is resolved here serially before the next BFS
+			-- round. Manifests are tiny, so this only costs the missers.
+			for _, n in ipairs(batch) do
+				if not manifest_cache[n] then
+					local m = fetch_manifest(n)
+					if m then
+						manifest_cache[n] = m
+						for _, dep in ipairs(m.deps or {}) do
+							if not seen[dep.name] then
+								seen[dep.name] = true
+								queue[#queue + 1] = dep.name
 							end
 						end
 					end
@@ -1049,6 +1071,15 @@ function actions.transcend(flags)
 					end
 				end
 			end
+		end
+	end
+	-- Multi-repo: the parallel pass only knows the first repository. Resolve
+	-- anything it missed (a package living in a later repository) serially so
+	-- -Transcend can still upgrade it.
+	for _, name in ipairs(installed) do
+		if not manifest_cache[name] then
+			local m = repo.fetch_manifest(name)
+			if m then manifest_cache[name] = m end
 		end
 	end
 

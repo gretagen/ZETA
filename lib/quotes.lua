@@ -79,6 +79,7 @@ local quotes = {
   
   default = {
     "We all have to try new things.",
+    "The solver of the absolute fabric.",
     "If it's not there just subspace-merge",
     "Starting up ZETA for you",
     "We'll get it all someday",
