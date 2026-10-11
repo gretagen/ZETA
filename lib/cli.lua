@@ -1,8 +1,8 @@
 -- cli.lua -- argument parsing for Zeta.
 --
 -- Command tokens start with a single dash and match the documented forms
--- (-Provide, -LocalProvide, -Remove, -List, -Localize, -Help, -ReProvide).
--- Match is case-insensitive so -provide and -PROVIDE also work. Flags
+-- (-Provide, -LocalProvide, -ReProvide, -Solve, -Remove, -List, -Localize,
+-- -Help). Match is case-insensitive so -provide and -PROVIDE also work. Flags
 -- start with a double dash (--pass, --force, --with-deps, --detail,
 -- --silence, --help).
 -- Install/remove commands accept one or more package names.
@@ -15,6 +15,7 @@ local COMMANDS = {
   provide = true,
   reprovide = true,
   localprovide = true,
+  solve = true,
   transcend = true,
   remove = true,
   list = true,
@@ -39,6 +40,7 @@ local MIN_ARGS = {
   provide = 1,
   reprovide = 1,
   localprovide = 1,
+  solve = 1,
   remove = 1,
 }
 

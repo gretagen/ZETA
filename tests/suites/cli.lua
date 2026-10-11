@@ -17,7 +17,7 @@ local function bad(args)
 end
 
 suite:test("every documented command parses", function()
-  for _, c in ipairs({ "-Provide", "-ReProvide", "-LocalProvide", "-Remove", "-Localize", "-Test" }) do
+  for _, c in ipairs({ "-Provide", "-ReProvide", "-LocalProvide", "-Solve", "-Remove", "-Localize", "-Test" }) do
     local p = parse({ c, "pkg" })
     lib.assert_eq(p.args[1], "pkg")
   end
@@ -53,6 +53,7 @@ suite:test("missing argument is rejected", function()
   bad({ "-Provide" })
   bad({ "-ReProvide" })
   bad({ "-LocalProvide" })
+  bad({ "-Solve" })
   bad({ "-Localize" })
   bad({ "-Test" })
 end)
@@ -68,6 +69,14 @@ suite:test("install and remove commands accept multiple names", function()
   lib.assert_eq(parse({ "-Provide", "a", "b", "c" }).args, { "a", "b", "c" })
   lib.assert_eq(parse({ "-ReProvide", "x", "y" }).args, { "x", "y" })
   lib.assert_eq(parse({ "-LocalProvide", "m", "n" }).args, { "m", "n" })
+  lib.assert_eq(parse({ "-Solve", "m", "n" }).args, { "m", "n" })
+end)
+
+suite:test("-Solve is a command and pairs with --isolate", function()
+  local p = parse({ "-Solve", "app", "--isolate" })
+  lib.assert_eq(p.command, "solve")
+  lib.assert_true(p.flags.isolate)
+  lib.assert_eq(p.args[1], "app")
 end)
 
 suite:test("--with-deps is recorded", function()

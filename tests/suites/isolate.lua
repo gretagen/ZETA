@@ -8,6 +8,7 @@ local config = require("config")
 local commit = require("commit")
 local db = require("db")
 local reserve = require("reserve")
+local actions = require("actions")
 local suite = lib.new_suite("isolate")
 
 local function fresh()
@@ -247,6 +248,28 @@ suite:test("unlink_system removes only the given store's links", function()
   lib.assert_nil(path.readlink(path.join(root, "usr/bin/real")), "real file not a link")
   lib.assert_contains(lib.read(path.join(root, "usr/bin/real")), "#!/bin/sh",
     "real file untouched")
+end)
+
+suite:test("-Solve targets the matching registry", function()
+  local p = cli.parse({ "-Solve", "pkg", "--isolate" })
+  lib.assert_true(p ~= nil, "parse should succeed")
+  lib.assert_eq(p.command, "solve")
+  lib.assert_true(p.flags.isolate)
+
+  local root = fresh()
+  db.record("hello", { name = "hello", version = "1.0", deps = {} },
+    { "usr/bin/hello" }, { isolated = true, reserve_root = path.join(config.get().reserve_dir, "hello-1.0") })
+  db.record("world", { name = "world", version = "1.0", deps = {} },
+    { "usr/bin/world" }, {})
+
+  -- System mode refuses an isolated-only package; isolate mode refuses a
+  -- package that only exists system-side; unknown names are refused outright.
+  lib.assert_eq(actions.solve({ "hello" }, { pass = true }), 1,
+    "isolated-only package needs --isolate")
+  lib.assert_eq(actions.solve({ "world" }, { isolate = true, pass = true }), 1,
+    "system-only package cannot be solved isolated")
+  lib.assert_eq(actions.solve({ "ghost" }, { pass = true }), 1,
+    "unknown package refused")
 end)
 
 return suite

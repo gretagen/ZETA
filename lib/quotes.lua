@@ -45,6 +45,7 @@ local quotes = {
     "A reminder to frequently create generations in case something breaks.",
     "Dividing packages by 0",
     "[[Hyperlink Blocked]].",
+    "It's time to drop, LET'S A GOOO!!!!",
     "Returning void because nothing is left behind.",
   },
   forget = {
@@ -79,7 +80,6 @@ local quotes = {
   
   default = {
     "We all have to try new things.",
-    "The solver of the absolute fabric.",
     "If it's not there just subspace-merge",
     "Starting up ZETA for you",
     "We'll get it all someday",
@@ -154,6 +154,24 @@ local quotes = {
     "Prevent conflicts, at a cost. (Your storage)",
     "Composing demands a degree of isolation.",
     "Doctor, are you sure this will work?"
+  },
+  solve = {
+  	"The solver of the absolute fabric.",
+  	"Seriously...",
+  	"It's such an enigma.",
+  	"And this is why you isolate packages, people.",
+  	"NOOOOOOOOOOAEGHHHHHHHH",
+  	"Just reinstall with --isolate at this point.",
+  	"Another day, another breakage to solve.",
+  	"You know if I wasn't here you'd be troubleshooting for hours right?",
+  	"davinci resolve can't do this btw",
+  	"we cannot solve our problems with the same thinking we used when we created them.",
+  	"Focus on the solution, not the problem",
+  	"Solve the problem, or leave the problem, but don't live with the problem",
+  	"awh come on man :<",
+  	"The problem contains the solution.",
+  	"Does he know",
+  	
   },
 }
 

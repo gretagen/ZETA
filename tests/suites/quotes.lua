@@ -6,7 +6,7 @@ local suite = lib.new_suite("quotes")
 
 local GROUPS = {
   "transcend", "remove", "forget", "list", "default", "localize",
-  "help", "reprovide", "slowdownload", "isolate",
+  "help", "reprovide", "slowdownload", "isolate", "solve",
 }
 
 suite:test("every quote group is a non-empty list of non-empty strings", function()
@@ -41,6 +41,9 @@ suite:test("for_command: isolate quotes only for -Provide --isolate", function()
   lib.assert_eq(quotes.for_command("provide", false), quotes.default)
   lib.assert_eq(quotes.for_command("list", false), quotes.list)
   lib.assert_eq(quotes.for_command("nonsense", false), quotes.default)
+  -- solve has its own group, with or without --isolate
+  lib.assert_eq(quotes.for_command("solve", false), quotes.solve)
+  lib.assert_eq(quotes.for_command("solve", true), quotes.solve)
 end)
 
 suite:test("set_enabled toggles is_enabled", function()

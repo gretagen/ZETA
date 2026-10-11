@@ -433,6 +433,50 @@ suite:test("-ReProvide reinstalls an installed package", function()
   lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/hello")))
 end)
 
+suite:test("-Solve reinstalls a package's dependencies, leaving the package intact", function()
+  local e = fresh_env()
+  lib.run_zeta({ "-Provide", "app", "--pass" }, e)   -- app depends on hello
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/app")))
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/hello")))
+
+  -- Simulate a damaged dependency, then repair it without touching app.
+  os.remove(path.join(e.ZETA_ROOT, "usr/bin/hello"))
+
+  local code, out = lib.run_zeta({ "-Solve", "app", "--pass" }, e)
+  lib.assert_eq(code, 0, out)
+  lib.assert_contains(out, "will reinstall hello")
+  lib.assert_not_contains(out, "will reinstall app", "the target must not be reinstalled")
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/hello")), "hello restored")
+end)
+
+suite:test("-Solve --isolate rebuilds the reserved store", function()
+  local e = fresh_env()
+  lib.run_zeta({ "-Provide", "app", "--pass", "--isolate" }, e)
+  local store = path.join(e.ZETA_ROOT, "zeta/reserve/app-1.0")
+  lib.assert_true(lib.exists(path.join(store, "usr/bin/hello")), "dep lives in the store")
+
+  os.remove(path.join(store, "usr/bin/hello"))
+
+  local code, out = lib.run_zeta({ "-Solve", "app", "--pass", "--isolate" }, e)
+  lib.assert_eq(code, 0, out)
+  lib.assert_contains(out, "isolated at")
+  lib.assert_true(lib.exists(path.join(store, "usr/bin/hello")), "store dependency restored")
+end)
+
+suite:test("-Solve refuses a package that is not installed", function()
+  local code, out = lib.run_zeta({ "-Solve", "ghost", "--pass" }, fresh_env())
+  lib.assert_eq(code, 1)
+  lib.assert_contains(out, "has not been provided")
+end)
+
+suite:test("-Solve points at --isolate for an isolated-only package", function()
+  local e = fresh_env()
+  lib.run_zeta({ "-Provide", "hello", "--pass", "--isolate" }, e)
+  local code, out = lib.run_zeta({ "-Solve", "hello", "--pass" }, e)
+  lib.assert_eq(code, 1)
+  lib.assert_contains(out, "installed as isolated")
+end)
+
 suite:test("-List reports installed packages", function()
   local e = fresh_env()
   lib.run_zeta({ "-Provide", "hello", "--pass" }, e)

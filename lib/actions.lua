@@ -33,6 +33,9 @@ Commands:
   -Provide <pkg>...       Install packages and their dependencies from the remote repository
   -ReProvide <pkg>...     Reinstall packages even if they are already installed
   -LocalProvide <pkg>...  Install packages from the local /packages tree
+  -Solve <pkg>...         Repair a package by reinstalling its whole dependency
+                          closure (the package itself is left intact). With
+                          --isolate, rebuild its reserved store instead.
   -Transcend              Update all installed packages to their latest versions
   -Remove <pkg>...        Remove installed packages (see --with-deps)
   -List                   List installed packages and dependencies
@@ -57,6 +60,7 @@ Flags:
                           (package + full dependency closure, exposed through
                           <root>/zeta/reserve/profile/bin and linked into
                           /usr/bin / /usr/sbin, skipping names already taken).
+                          With -Solve: rebuild that store in place.
                           With -Remove: delete the isolated store instead of
                           the system copy.
   --no-quote              Disable random startup quotes
@@ -142,13 +146,17 @@ local function plan_kind(item, target)
 	return (cur == "package") and "package" or "dependency"
 end
 
--- Shared install flow for -Provide / -LocalProvide / -ReProvide.
+-- Shared install flow for -Provide / -LocalProvide / -ReProvide / -Solve.
 -- flags.isolate: install into a self-contained store under the reserve dir
 -- (package + full dependency closure), exposed through the profile bin dir.
+-- flags.solve: reinstall the dependency closure instead of skipping installed
+-- deps; the named package is dropped from the plan unless isolated, where the
+-- store is rebuilt as a unit (package included).
 function actions._install(name, flags, opts)
 	local source = opts.source
 	local base = config.get().local_packages
 	local isolate = flags.isolate == true
+	local solve = flags.solve == true
 
 	local fetch_manifest
 	if source == "local" then
@@ -184,9 +192,10 @@ function actions._install(name, flags, opts)
 	while #queue > 0 do
 		local batch = {}
 		for _, n in ipairs(queue) do
-			-- Isolated installs prefetch everything: a system-installed dep
-			-- does not satisfy a store that must be self-contained.
-			if not manifest_cache[n] and (isolate or not db.is_installed(n)) then
+			-- Isolated installs and -Solve prefetch everything: a system-installed
+			-- dep does not satisfy a self-contained store, and -Solve must be able
+			-- to rebuild already-installed deps.
+			if not manifest_cache[n] and (isolate or solve or not db.is_installed(n)) then
 				batch[#batch + 1] = n
 			end
 		end
@@ -259,9 +268,9 @@ function actions._install(name, flags, opts)
 	local ok, plan = pcall(deps.resolve, name, {
 		fetch_manifest = cached_fetch_manifest,
 		installed_version = function(n)
-			-- Isolation never accepts a system-installed dep: the store gets
-			-- its own copy of the whole closure.
-			if isolate then return nil end
+			-- Isolation never accepts a system-installed dep, and -Solve exists
+			-- precisely to reinstall installed deps: both want the full closure.
+			if isolate or solve then return nil end
 			local m = db.get(n)
 			return m and m.version or nil
 		end,
@@ -286,6 +295,19 @@ function actions._install(name, flags, opts)
 		end
 	end
 
+	-- -Solve (system mode) repairs the target by reinstalling what it depends
+	-- on, so the target itself is dropped and left untouched. An isolated store
+	-- is a self-contained unit: its package is rebuilt along with the closure.
+	if solve and not isolate then
+		if target_item and target_item.name == name then
+			plan[#plan] = nil
+		end
+		if #plan == 0 then
+			log.info(("no dependencies to reinstall for %s"):format(name))
+			return 0
+		end
+	end
+
 	-- Isolated install: the store path is derived from the target's version.
 	local store
 	if isolate then
@@ -296,8 +318,9 @@ function actions._install(name, flags, opts)
 		store = reserve.store_path(name, target_manifest and target_manifest.version)
 	end
 
+	local verb = solve and "will reinstall" or "will provide"
 	for _, item in ipairs(plan) do
-		print(("  will provide %s-%s"):format(item.name, item.manifest.version))
+		print(("  %s %s-%s"):format(verb, item.name, item.manifest.version))
 	end
 	if isolate then
 		print(("  isolated at %s"):format(store))
@@ -305,7 +328,11 @@ function actions._install(name, flags, opts)
 	print("")
 
 	local confirm_msg
-	if isolate then
+	if solve and isolate then
+		confirm_msg = ("Rebuild the isolated store at %s (%d packages)?"):format(store, #plan)
+	elseif solve then
+		confirm_msg = ("Reinstall the %d dependencies of %s?"):format(#plan, name)
+	elseif isolate then
 		confirm_msg = ("Install %d package(s) isolated at %s?"):format(#plan, store)
 	else
 		confirm_msg = ("Install %d package(s)?"):format(#plan)
@@ -494,6 +521,51 @@ function actions.reprovide(names, flags)
 			if ok ~= 0 then
 				return ok
 			end
+		end
+	end
+	return 0
+end
+
+-- -Solve <pkg>: repair a package by reinstalling its whole dependency closure.
+-- In system mode the target is dropped from the plan and left untouched; with
+-- --isolate the package's self-contained store is rebuilt, target included.
+function actions.solve(names, flags)
+	local isolate = flags.isolate == true
+	for _, raw in ipairs(names) do
+		local name = path.sanitize_name(raw)
+		if not name then
+			log.error("invalid package name: " .. tostring(raw))
+			return 1
+		end
+		-- Repair targets an existing install: the two registries are separate,
+		-- so point the user at the matching mode when they pick the wrong one.
+		if isolate then
+			if not db.isolated(name) then
+				if db.kind(name) then
+					log.error(("%s is installed normally -- use -Solve %s without --isolate."):format(name, name))
+				else
+					log.error(("%s is not installed as isolated -- provide it with -Provide %s --isolate first."):format(name, name))
+				end
+				return 1
+			end
+		else
+			if not db.kind(name) then
+				if db.isolated(name) then
+					log.error(("%s is installed as isolated -- use -Solve %s --isolate."):format(name, name))
+				else
+					log.error(("%s has not been provided."):format(name))
+				end
+				return 1
+			end
+		end
+		local ok = actions._install(name, {
+			pass = flags.pass,
+			force = true,
+			isolate = isolate,
+			solve = true,
+		}, { source = "remote" })
+		if ok ~= 0 then
+			return ok
 		end
 	end
 	return 0
