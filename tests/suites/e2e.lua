@@ -449,6 +449,23 @@ suite:test("-Solve reinstalls a package's dependencies, leaving the package inta
   lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/hello")), "hello restored")
 end)
 
+suite:test("-Solve reinstalls only the target's direct dependencies", function()
+  local e = fresh_env()
+  lib.run_zeta({ "-Provide", "app2", "--pass" }, e)   -- app2 -> app -> hello
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/app2")))
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/app")))
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/hello")))
+
+  os.remove(path.join(e.ZETA_ROOT, "usr/bin/app"))
+
+  local code, out = lib.run_zeta({ "-Solve", "app2", "--pass" }, e)
+  lib.assert_eq(code, 0, out)
+  lib.assert_contains(out, "will reinstall app-1.0")
+  lib.assert_not_contains(out, "will reinstall hello-1.0", "transitive deps must be left alone")
+  lib.assert_not_contains(out, "will reinstall app2-1.0", "the target must not be reinstalled")
+  lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/app")), "direct dep restored")
+end)
+
 suite:test("-Solve --isolate rebuilds the reserved store", function()
   local e = fresh_env()
   lib.run_zeta({ "-Provide", "app", "--pass", "--isolate" }, e)
