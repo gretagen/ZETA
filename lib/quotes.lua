@@ -22,6 +22,7 @@ local quotes = {
     "ZETA package updates? what a funny joke.",
     "A rare occurence is when ZETA has package updates.",
     "A reminder to frequently create generations in case something breaks",
+    "I get high on your memory",
   },
 
   remove = {
@@ -165,7 +166,7 @@ local quotes = {
   	"Another day, another breakage to solve.",
   	"You know if I wasn't here you'd be troubleshooting for hours right?",
   	"davinci resolve can't do this btw",
-  	"we cannot solve our problems with the same thinking we used when we created them.",
+  	"we cannot solve problems with the same thinking we used to create.",
   	"Focus on the solution, not the problem",
   	"Solve the problem, or leave the problem, but don't live with the problem",
   	"awh come on man :<",
@@ -175,9 +176,7 @@ local quotes = {
   },
 }
 
--- ---------------------------------------------------------------------------
 -- Runtime API
--- ---------------------------------------------------------------------------
 
 -- Global switch: zeta.lua calls set_enabled() from --no-quote and the quotes
 -- config so runtime quotes (slow downloads) honor both.

@@ -1,9 +1,90 @@
 #!/bin/bash
 # zeta launcher: runs the entry point with the system Lua interpreter.
+#
+# Only the operations that need superuser privileges are gated:
+#
+#   -Provide -ReProvide -LocalProvide -Solve -Transcend -Remove -Test -Forget
+#
+# Everything else runs as any user -- the read-only commands (-Localize searches
+# the remote index, -List reads the installed database, -Help prints usage) and
+# any invocation Zeta itself rejects with a usage error (no command, unknown
+# command), which reports the error instead of a privilege quote. Keep the
+# privileged list in sync with COMMANDS in lib/cli.lua.
+#
+# The command token is resolved exactly the way lib/cli.lua does: the first
+# single-dash argument, matched case-insensitively (so -list and -LIST work
+# too), with "h" an alias for "help"; --help sets the command unconditionally,
+# so "zeta -List --help" resolves to help.
+#
+# This is a courtesy gate, not a security boundary: lib/zeta/zeta.lua can
+# still be run directly with any Lua interpreter.
 
-if [ "$EUID" -ne 0 ]; then
-    echo "ZETA requires superuser privileges to function."
-    exit 1
-fi
+# Resolve the command the way lib/cli.lua would.
+cmd=""
+for a in "$@"; do
+    case "$a" in
+        --help)
+            cmd="help"
+            ;;
+        --*)
+            # Any other --flag never names a command.
+            ;;
+        -*)
+            if [ -z "$cmd" ]; then
+                c="${a#-}"
+                c="$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')"
+                if [ "$c" = "h" ]; then c="help"; fi
+                cmd="$c"
+            fi
+            ;;
+    esac
+done
+
+case "$cmd" in
+    provide|reprovide|localprovide|solve|transcend|remove|test|forget)
+        # Privileged: mutates the system or its download cache.
+        if [ "$EUID" -ne 0 ]; then
+            quotes=(
+                "This operation requires superuser privileges to function."
+                "Nice try, mortal."
+                "ZETA demands supreme authority."
+                "HELL no."
+                "No."
+                "No can't do"
+                "Are you familiar with the term root access?"
+                "ZETA demands supreme authority."
+                "My apologies $USER, but superuser privileges are required."
+                "It is with dissapointment that you can't do that without superuser privileges"
+                "It's a shame you can't do that without superuser privileges"
+                "Basic security."
+                "You know, even if were able to use this without superuser privileges, it would fail right?"
+                "Be logical for once..."
+                "Use your brain, the thing in your head?"
+                "I guess bro"
+                "??????"
+                "Don't got access to that, do ya?"
+                "BLOCKED."
+                "Did you forget to elevate yourself? Or are you just desperately trying to override ZETA because the system administrator didn't give you superuser operations?"
+                "Yeah...That won't work, Not in a million years."
+                "Who's going to tell bro"
+                "I'm sorry $USER, I'm afraid I can't do that."
+                "Get a grip."
+                "Tap into using zeta with privileges"
+                "Access denied"
+                "Trying running it as root next time"
+                "$USER... you know you can't do that without privileges..."
+            )
+
+            # Select a random quote from the array
+            rand_idx=$((RANDOM % ${#quotes[@]}))
+            echo "${quotes[$rand_idx]}"
+            exit 1
+        fi
+        ;;
+    *)
+        # -Localize / -List / -Help are read-only, and anything else is a
+        # usage error that Zeta reports itself.
+        ;;
+esac
 
 exec lua "$(dirname "$0")/../lib/zeta/zeta.lua" "$@"

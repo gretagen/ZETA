@@ -11,6 +11,9 @@ local cli = {}
 
 local log = require("log")
 
+-- Commands Zeta understands. Anything that mutates the system (or the download
+-- cache) must also be listed in the privilege gate in bin/zeta, which blocks it
+-- for non-root users.
 local COMMANDS = {
   provide = true,
   reprovide = true,
