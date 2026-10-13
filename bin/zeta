@@ -73,6 +73,7 @@ case "$cmd" in
                 "Access denied"
                 "Trying running it as root next time"
                 "$USER... you know you can't do that without privileges..."
+                "Are you? Are you?"
             )
 
             # Select a random quote from the array
