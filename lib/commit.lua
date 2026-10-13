@@ -68,6 +68,20 @@ function commit.apply(staging, opts)
   opts = opts or {}
   local entries = walk_staging(staging)
 
+  -- Validate every staged entry BEFORE anything is copied: relative paths
+  -- must never climb out of the install root, and symlink targets must not
+  -- escape it (absolute targets are fine -- they resolve at runtime against
+  -- the real root). Same rules archive.validate enforces on tarball members,
+  -- enforced again here because commit.apply can be fed any staging tree.
+  for _, e in ipairs(entries) do
+    if e.rel == "" or e.rel:match("^/") or not path.relative_inside(e.rel) then
+      error(("staging entry %q escapes the root"):format(e.rel), 0)
+    end
+    if e.type == "symlink" and path.symlink_escapes(e.rel, e.target) then
+      error(("symlink %q -> %q escapes the root"):format(e.rel, e.target), 0)
+    end
+  end
+
   if opts.whitelist then
     local wl = {}
     for _, w in ipairs(opts.whitelist) do wl[w] = true end
@@ -227,7 +241,8 @@ function commit.apply(staging, opts)
 
   -- Linker cache maintenance only applies to the real system root: an
   -- isolated store never touches the host's ld.so.conf or ld.so.cache (its
-  -- binaries resolve libraries through the profile wrapper's LD_LIBRARY_PATH).
+  -- binaries resolve libraries through their store RPATHs, with the profile
+  -- wrapper's LD_LIBRARY_PATH as fallback).
   if not isolated then
     -- Ensure the dynamic linker knows about /usr/lib and /lib. The default
     -- ld.so.conf only lists /usr/local/lib and /opt/lib; without these paths

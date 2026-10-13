@@ -272,4 +272,101 @@ suite:test("-Solve targets the matching registry", function()
     "unknown package refused")
 end)
 
+local function cmd_ok(cmd)
+  local ok = os.execute(cmd)
+  if type(ok) == "number" then return ok == 0 end
+  return ok == true
+end
+
+suite:test("patch_rpaths stamps ELF objects and keeps wrappers env-free", function()
+  if not cmd_ok("command -v patchelf >/dev/null 2>&1") then
+    print("    [skip] patchelf not installed -- skipping RPATH test")
+    return
+  end
+
+  local root = fresh()
+  local cfg = config.get()
+  local store = path.join(cfg.reserve_dir, "tool-1.0")
+  os.execute("mkdir -p " .. path.quote(path.join(store, "usr/bin")) .. " "
+    .. path.quote(path.join(store, "usr/lib")))
+
+  -- A real ELF binary (named "true" so multicall coreutils still behaves)
+  -- and a real shared library (needs a SONAME to be recognized as one). If
+  -- /bin/true is not a patchable ELF here, there is nothing to test.
+  if not cmd_ok("cp /bin/true " .. path.quote(path.join(store, "usr/bin/true"))
+      .. " 2>/dev/null || cp /usr/bin/true " .. path.quote(path.join(store, "usr/bin/true")))
+    or not cmd_ok("patchelf --print-rpath " .. path.quote(path.join(store, "usr/bin/true"))
+      .. " >/dev/null 2>&1") then
+    print("    [skip] no patchable ELF /bin/true available to stage a test object")
+    return
+  end
+  local have_lib = cmd_ok("cp $(find /lib /lib64 /usr/lib /usr/lib64 -maxdepth 2 -name libc.so.6 2>/dev/null | head -1) "
+    .. path.quote(path.join(store, "usr/lib/libfake.so.1")) .. " 2>/dev/null")
+
+  -- Only executables are stamped: libraries resolve through the inherited
+  -- DT_RPATH and must never be rewritten (fragile prebuilt layouts break).
+  local patched = reserve.patch_rpaths(store)
+  lib.assert_eq(patched, 1, "only the executable is stamped")
+
+  -- Idempotent: nothing left to patch on a second run.
+  lib.assert_eq(reserve.patch_rpaths(store), 0, "second run patches nothing")
+
+  -- The binary resolves its libraries from the store on its own; the
+  -- library stays untouched.
+  local f = path.popen("patchelf --print-rpath "
+    .. path.quote(path.join(store, "usr/bin/true")))
+  local rpath = f and f:read("*l") or ""
+  if f then f:close() end
+  lib.assert_contains(rpath, store, "RPATH points into the store")
+
+  if have_lib then
+    local g = path.popen("patchelf --print-rpath "
+      .. path.quote(path.join(store, "usr/lib/libfake.so.1")))
+    local lib_rpath = g and g:read("*l") or ""
+    if g then g:close() end
+    lib.assert_eq(lib_rpath, "", "library RPATH untouched")
+  end
+
+  -- So its wrapper is a bare exec: no environment export, no leak.
+  reserve.link_profile(store, { "usr/bin/true" })
+  local body = lib.read(path.join(cfg.reserve_dir, "profile/bin/true"))
+  lib.assert_not_contains(body, "LD_LIBRARY_PATH", "wrapper must not export LD_LIBRARY_PATH")
+  lib.assert_contains(body, "exec " .. path.join(store, "usr/bin/true"),
+    "wrapper execs the store binary")
+
+  -- And it actually runs.
+  lib.assert_true(cmd_ok(path.quote(path.join(cfg.reserve_dir, "profile/bin/true"))),
+    "bare wrapper runs the ELF binary")
+end)
+
+suite:test("bare wrappers are still recognized by unlink_profile/unlink_system", function()
+  if not cmd_ok("command -v patchelf >/dev/null 2>&1") then
+    print("    [skip] patchelf not installed -- skipping bare-wrapper unlink test")
+    return
+  end
+
+  local root = fresh()
+  local cfg = config.get()
+  local store = path.join(cfg.reserve_dir, "tool-1.0")
+  os.execute("mkdir -p " .. path.quote(path.join(store, "usr/bin")))
+  if not cmd_ok("cp /bin/true " .. path.quote(path.join(store, "usr/bin/tool"))
+      .. " 2>/dev/null || cp /usr/bin/true " .. path.quote(path.join(store, "usr/bin/tool"))) then
+    print("    [skip] no /bin/true available to stage an ELF test object")
+    return
+  end
+
+  reserve.patch_rpaths(store)
+  reserve.link_profile(store, { "usr/bin/tool" })
+  reserve.link_system(store, { "usr/bin/tool" })
+
+  local removed_links = reserve.unlink_system(store)
+  lib.assert_eq(removed_links, 1, "system link removed via bare wrapper")
+  lib.assert_nil(path.readlink(path.join(root, "usr/bin/tool")), "system link gone")
+
+  local removed_wraps = reserve.unlink_profile(store)
+  lib.assert_eq(removed_wraps, 1, "bare wrapper removed")
+  lib.assert_false(path.exists(path.join(cfg.reserve_dir, "profile/bin/tool")),
+    "wrapper file gone")
+end)
+
 return suite

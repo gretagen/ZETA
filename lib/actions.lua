@@ -456,9 +456,15 @@ function actions._install(name, flags, opts)
 		end
 	end
 
-	-- Isolated: expose the target's own binaries through the profile, then
-	-- link them into the FHS system bin dirs so they run from the default PATH.
+	-- Isolated: stamp the store's ELF objects with store RPATHs (so wrappers
+	-- can stay env-free), expose the target's own binaries through the
+	-- profile, then link them into the FHS system bin dirs so they run from
+	-- the default PATH.
 	if isolate then
+		local patched = reserve.patch_rpaths(store)
+		if patched then
+			log.ok(("%d ELF object(s) stamped with store RPATHs"):format(patched))
+		end
 		local files = db.isolated_files(name)
 		local created = reserve.link_profile(store, files)
 		if #created > 0 then
