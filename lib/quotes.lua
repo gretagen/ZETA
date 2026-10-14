@@ -23,6 +23,8 @@ local quotes = {
     "A rare occurence is when ZETA has package updates.",
     "A reminder to frequently create generations in case something breaks",
     "I get high on your memory",
+    "Feels more outdated than Debian.",
+    "Forget the past, leave it away, let's break things again or not?",
   },
 
   remove = {
@@ -48,6 +50,8 @@ local quotes = {
     "[[Hyperlink Blocked]].",
     "It's time to drop, LET'S A GOOO!!!!",
     "Returning void because nothing is left behind.",
+    "Error: nothing, stop reading this and focus on removing this package",
+    "hippopotomonstrosesquipedaliophobia",
   },
   forget = {
     "Looks like it's sweeping time!",
@@ -55,6 +59,7 @@ local quotes = {
     "Like a memory, you forget.",
     "It's just a burning memory.",
     "Every legend, no matter how great, fades with time",
+    "Reminder: nevermind",
   },
 
   list = {
@@ -76,7 +81,7 @@ local quotes = {
     "Unspooling the infinite scroll...",
     "There is beauty in a well-ordered array.",
     "To list is to bring light to the invisible.",
-    
+    "Grocery list, except it's already in the house.",
   },
   
   default = {
@@ -99,6 +104,7 @@ local quotes = {
     "Because your machine clearly needs more stuff in it.",
     "Let's hope this won't conflict with anything.",
     "A reminder to frequently create generations in case something breaks.",
+    "Trust me this will be fast! (i think)",
   },
 
   localize = {
@@ -122,7 +128,8 @@ local quotes = {
    },
 
   help = {
-    "No worries it's very simple" 	
+    "No worries it's very simple"
+    "Let's help someone like you:"
   },
 
   reprovide = {
@@ -134,6 +141,7 @@ local quotes = {
   },
 
   slowdownload = {
+   "I identify myself as a cockroach."
    "This is a waste of your time",
    "Consider getting a better router",
    "For your own sanity please get better internet access",
@@ -141,7 +149,7 @@ local quotes = {
    "It's not your fault if your internet is so mediocre",
    "Feels like we're still in the 90's",
    "Patience, my child",
-   "This is not a ZETA issue, this is just your internet being slow.",
+   "This is not a ZETA issue, this is just your internet being slow. Wait what the kernel panic am i saying-",
   },
 
   isolate = {
@@ -172,7 +180,7 @@ local quotes = {
   	"awh come on man :<",
   	"The problem contains the solution.",
   	"Does he know",
-  	
+    "RAAHAHSAHFDAKJLJWOIPRJFVKIOPFVWJFOVRJFADOPIJOPWUTGOJVDLFKLEWRJOPWJIKEOSIJHH",
   },
 }
 
