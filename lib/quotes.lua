@@ -23,8 +23,11 @@ local quotes = {
     "A rare occurence is when ZETA has package updates.",
     "A reminder to frequently create generations in case something breaks",
     "I get high on your memory",
-    "Feels more outdated than Debian.",
+    "Feels more outdated than Debian...",
     "Forget the past, leave it away, let's break things again or not?",
+    "1 in a 100 chance that there's a package update.",
+    "We've been wanting to contact you about your packages extended warranty",
+    "Haliade OS is not responsible for any damage to property or person occuring during the transcending.",
   },
 
   remove = {
@@ -60,6 +63,8 @@ local quotes = {
     "It's just a burning memory.",
     "Every legend, no matter how great, fades with time",
     "Reminder: nevermind",
+    "Can rememberr",
+    "Don't use -Forget, they put something in it, to make you forget, I don't even remember how I got here...",
   },
 
   list = {
@@ -105,6 +110,7 @@ local quotes = {
     "Let's hope this won't conflict with anything.",
     "A reminder to frequently create generations in case something breaks.",
     "Trust me this will be fast! (i think)",
+    "ZETA probably will end up having more quotes than lines of code",
   },
 
   localize = {
@@ -128,8 +134,8 @@ local quotes = {
    },
 
   help = {
-    "No worries it's very simple"
-    "Let's help someone like you:"
+    "No worries it's very simple",
+    "Let's help someone like you:",
   },
 
   reprovide = {
@@ -149,7 +155,8 @@ local quotes = {
    "It's not your fault if your internet is so mediocre",
    "Feels like we're still in the 90's",
    "Patience, my child",
-   "This is not a ZETA issue, this is just your internet being slow. Wait what the kernel panic am i saying-",
+   "This is not a ZETA issue, this is just your internet being slow.",
+   "You're too slow",
   },
 
   isolate = {
@@ -162,7 +169,7 @@ local quotes = {
     "Liberty is the possibility of isolation.",
     "Prevent conflicts, at a cost. (Your storage)",
     "Composing demands a degree of isolation.",
-    "Doctor, are you sure this will work?"
+    "Doctor, are you sure this will work?",
   },
   solve = {
   	"The solver of the absolute fabric.",
@@ -181,6 +188,8 @@ local quotes = {
   	"The problem contains the solution.",
   	"Does he know",
     "RAAHAHSAHFDAKJLJWOIPRJFVKIOPFVWJFOVRJFADOPIJOPWUTGOJVDLFKLEWRJOPWJIKEOSIJHH",
+    "Someday, this will all be BAD memory..",
+    "I just knew it was going to be one of those days...",
   },
 }
 
