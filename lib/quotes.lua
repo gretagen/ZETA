@@ -147,7 +147,7 @@ local quotes = {
   },
 
   slowdownload = {
-   "I identify myself as a cockroach."
+   "I identify myself as a cockroach.",
    "This is a waste of your time",
    "Consider getting a better router",
    "For your own sanity please get better internet access",
