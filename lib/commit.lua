@@ -60,6 +60,44 @@ local function walk_staging(staging)
   return out
 end
 
+-- Verify that entries landed intact under `root`. Errors on a file that is
+-- missing and on a symlink whose relative, in-tree target does not resolve:
+-- that is exactly the shape of a half-extracted payload (usr/sbin/systemd ->
+-- ../lib/systemd/systemd arrived while its target did not, and the machine
+-- booted into "does not exist"). Empty files only warn — some packages
+-- legitimately ship them. Returns true, or nil, err naming the first offender.
+local function verify_entries(root, entries)
+  local empty = 0
+  for _, e in ipairs(entries) do
+    if e.type ~= "dir" then
+      local dest = path.join(root, e.rel)
+      if e.type == "symlink" then
+        local t = e.target or ""
+        -- Only relative in-tree targets are judged: absolute ones (Arch
+        -- payloads) resolve against the real root and may point at another
+        -- package entirely.
+        if t ~= "" and not t:match("^/") and not path.symlink_escapes(e.rel, t) then
+          if not path.run("test -e " .. path.quote(dest)) then
+            return nil, ("symlink %q -> %q does not resolve (half-installed payload?)")
+              :format(e.rel, t)
+          end
+        end
+      else
+        if not path.run("test -e " .. path.quote(dest)) then
+          return nil, ("file %q was not committed"):format(e.rel)
+        end
+        if not path.run("test -s " .. path.quote(dest)) then
+          empty = empty + 1
+        end
+      end
+    end
+  end
+  if empty > 0 then
+    log.warn(("%d committed file(s) are empty"):format(empty))
+  end
+  return true
+end
+
 -- apply(staging, opts) -> owned entries (files + symlinks + dirs).
 -- opts: whitelist (list of rel paths to commit), force, pkg_name,
 --       root (explicit install root — overrides config; set for isolated
@@ -158,6 +196,10 @@ function commit.apply(staging, opts)
   -- Copy phase. Non-verbose TTY mode shows a live updating progress line
   -- that overwrites itself in place. Verbose mode shows detailed per-file
   -- messages. Non-TTY mode skips per-file output entirely.
+  -- Refuse to touch the root before the staging tree is proven intact: a
+  -- half-extracted payload must fail loudly here, not dangle at boot.
+  local vok, verr = verify_entries(staging, owned)
+  if not vok then error(("staging check for %s: %s"):format(opts.pkg_name or "?", verr), 0) end
   local verbose = config.get().verbose
   local use_tty = spinner.enabled()
   local total = #owned
@@ -219,6 +261,11 @@ function commit.apply(staging, opts)
       end
     end
   end
+
+  -- Post-commit verification: everything just copied must be present in the
+  -- real root too (catches a copy that silently vanished under a full disk).
+  local rok, rerr = verify_entries(root, owned)
+  if not rok then error(("post-commit check for %s: %s"):format(opts.pkg_name or "?", rerr), 0) end
 
   -- Clear the progress line and show final count in green.
   if use_tty and not verbose and total > 0 then

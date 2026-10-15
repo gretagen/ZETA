@@ -56,6 +56,22 @@ suite:test("commits files, symlinks, and dirs", function()
   lib.assert_false(found["usr/lib"], "parent directories must NOT be recorded as owned")
 end)
 
+suite:test("a dangling in-tree symlink is refused before the root is touched", function()
+  local root = fresh()
+  local s = path.join(root, "stage-dangle")
+  os.execute("mkdir -p " .. path.quote(s .. "/usr/bin"))
+  os.execute("mkdir -p " .. path.quote(s .. "/usr/lib"))
+  -- The exact shape of the half-installed systemd payload: the boot-critical
+  -- link arrives, its target does not. The old code committed it and the
+  -- machine booted into "does not exist".
+  os.execute("ln -s ../lib/systemd/systemd " .. path.quote(s .. "/usr/bin/systemd"))
+  local ok, err = pcall(commit.apply, s, { pkg_name = "Dangle" })
+  lib.assert_false(ok, "commit must refuse a payload whose symlink target never landed")
+  lib.assert_contains(tostring(err), "does not resolve")
+  lib.assert_false(lib.exists(path.join(root, "usr/bin/systemd")),
+    "nothing from a broken payload may reach the root")
+end)
+
 suite:test("init-system and distro-identity paths are installed normally", function()
   local root = fresh()
   local s = path.join(root, "stage")
