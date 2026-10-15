@@ -72,6 +72,26 @@ suite:test("a dangling in-tree symlink is refused before the root is touched", f
     "nothing from a broken payload may reach the root")
 end)
 
+suite:test("a symlink to a file another package owns is accepted", function()
+  local root = fresh()
+  -- The exact false positive: upstream systemd ships
+  -- usr/lib/systemd/systemd-udevd -> ../../bin/udevadm while /bin/udevadm is
+  -- deliberately owned by the base root. The link resolves against the root
+  -- being installed into, so committing must not refuse it.
+  os.execute("mkdir -p " .. path.quote(root .. "/usr/bin"))
+  lib.write(path.join(root, "usr/bin/udevadm"), "#!/bin/sh\n")
+  local s = path.join(root, "stage-extlink")
+  os.execute("mkdir -p " .. path.quote(s .. "/usr/lib/systemd"))
+  os.execute("ln -s ../../bin/udevadm " .. path.quote(s .. "/usr/lib/systemd/systemd-udevd"))
+  local owned = commit.apply(s, { pkg_name = "ExtLink" })
+  lib.assert_true(lib.is_symlink(path.join(root, "usr/lib/systemd/systemd-udevd")))
+  local found = false
+  for _, e in ipairs(owned) do
+    if e.rel == "usr/lib/systemd/systemd-udevd" then found = true end
+  end
+  lib.assert_true(found)
+end)
+
 suite:test("init-system and distro-identity paths are installed normally", function()
   local root = fresh()
   local s = path.join(root, "stage")
