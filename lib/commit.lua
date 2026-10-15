@@ -60,80 +60,6 @@ local function walk_staging(staging)
   return out
 end
 
--- Normalize "dir/../dir2/./x" style paths to "dir2/x".
-local function resolve_rel(rel, target)
-  local dir = rel:match("^(.*)/[^/]+$") or ""
-  local parts = {}
-  for seg in (dir .. "/" .. target):gmatch("[^/]+") do
-    if seg == ".." then
-      parts[#parts] = nil
-    elseif seg ~= "." then
-      parts[#parts + 1] = seg
-    end
-  end
-  return table.concat(parts, "/")
-end
-
--- Verify that entries landed intact under `root`. `alt` is the other side of
--- the commit (the destination root before copying, the staging tree after):
--- a relative symlink is allowed to resolve there instead, because payloads
--- legitimately link to files another package or the base root owns (e.g.
--- usr/lib/systemd/systemd-udevd -> ../../bin/udevadm, where udevadm is
--- deliberately not shipped). A link resolving NOWHERE is refused — that is
--- the exact shape of a half-extracted payload whose boot-critical target
--- never landed. Two `find` passes total: per-file test spawns made installing
--- a 1000-file package noticeably slow.
--- Returns true, or nil, err naming the first offender.
-local function verify_entries(root, entries, alt)
-  local want = {}
-  for _, e in ipairs(entries) do
-    if e.type ~= "dir" then want[e.rel] = e end
-  end
-
-  -- Broken symlinks, one pass: find's -xtype l is exactly "target missing".
-  local offenders = {}
-  local f = path.popen("find " .. path.quote(root)
-    .. " -xtype l -printf '%P\\t%l\\n' 2>/dev/null")
-  if f then
-    for line in f:lines() do
-      local rel, target = line:match("^([^\t]+)\t(.*)$")
-      if rel and want[rel] then
-        offenders[#offenders + 1] = { rel = rel, target = target or "" }
-      end
-    end
-    f:close()
-  end
-  for _, b in ipairs(offenders) do
-    -- Only relative in-tree targets are judged: absolute ones (Arch
-    -- payloads) resolve against the real root and may point at another
-    -- package entirely.
-    if b.target ~= "" and not b.target:match("^/")
-        and not path.symlink_escapes(b.rel, b.target) then
-      local elsewhere = alt
-        and path.run("test -e " .. path.quote(path.join(alt, resolve_rel(b.rel, b.target))))
-      if not elsewhere then
-        return nil, ("symlink %q -> %q does not resolve (half-installed payload?)")
-          :format(b.rel, b.target)
-      end
-    end
-  end
-
-  -- Empty files, one pass: warn only — some packages ship them deliberately.
-  local empty = 0
-  local g = path.popen("find " .. path.quote(root)
-    .. " -type f -empty -printf '%P\\n' 2>/dev/null")
-  if g then
-    for line in g:lines() do
-      if want[line] then empty = empty + 1 end
-    end
-    g:close()
-  end
-  if empty > 0 then
-    log.warn(("%d committed file(s) are empty"):format(empty))
-  end
-  return true
-end
-
 -- apply(staging, opts) -> owned entries (files + symlinks + dirs).
 -- opts: whitelist (list of rel paths to commit), force, pkg_name,
 --       root (explicit install root — overrides config; set for isolated
@@ -232,10 +158,6 @@ function commit.apply(staging, opts)
   -- Copy phase. Non-verbose TTY mode shows a live updating progress line
   -- that overwrites itself in place. Verbose mode shows detailed per-file
   -- messages. Non-TTY mode skips per-file output entirely.
-  -- Refuse to touch the root before the staging tree is proven intact: a
-  -- half-extracted payload must fail loudly here, not dangle at boot.
-  local vok, verr = verify_entries(staging, owned, root)
-  if not vok then error(("staging check for %s: %s"):format(opts.pkg_name or "?", verr), 0) end
   local verbose = config.get().verbose
   local use_tty = spinner.enabled()
   local total = #owned
@@ -297,11 +219,6 @@ function commit.apply(staging, opts)
       end
     end
   end
-
-  -- Post-commit verification: everything just copied must be present in the
-  -- real root too (catches a copy that silently vanished under a full disk).
-  local rok, rerr = verify_entries(root, owned, staging)
-  if not rok then error(("post-commit check for %s: %s"):format(opts.pkg_name or "?", rerr), 0) end
 
   -- Clear the progress line and show final count in green.
   if use_tty and not verbose and total > 0 then

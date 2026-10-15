@@ -28,7 +28,6 @@ local quotes = {
     "1 in a 100 chance that there's a package update.",
     "We've been wanting to contact you about your packages extended warranty",
     "Haliade OS is not responsible for any damage to property or person occuring during the transcending.",
-    "They always say time changes things, but you actually have to change them yourself.",
   },
 
   remove = {

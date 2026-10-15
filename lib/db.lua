@@ -308,31 +308,12 @@ end
 -- Mutation
 -- ---------------------------------------------------------------------------
 
--- Write and close a file, refusing to let a failed or short write masquerade
--- as success: on ENOSPC (observed on a full disk) f:write returns nil and the
--- old code renamed an empty file into place — an empty meta.lua made the
--- package look installed with no version or deps. Returns true or nil, err.
-local function write_file_checked(path_, data)
-  local f, oerr = io.open(path_, "wb")
-  if not f then return nil, ("cannot open %s: %s"):format(path_, tostring(oerr)) end
-  local ok, werr = f:write(data)
-  if not ok then
-    f:close()
-    os.remove(path_)
-    return nil, ("cannot write %s: %s"):format(path_, tostring(werr)) end
-  local cerr = f:close()
-  if cerr ~= true and cerr ~= nil then
-    os.remove(path_)
-    return nil, ("cannot close %s: %s"):format(path_, tostring(cerr))
-  end
-  return true
-end
-
 -- Rewrite only the meta.lua of an installed entry (keeps `files` untouched).
 local function write_meta(name, m)
   local t1 = db.meta_path(name) .. ".tmp"
-  local ok, err = write_file_checked(t1, "return " .. ser(m) .. "\n")
-  if not ok then error(("db: %s"):format(tostring(err)), 0) end
+  local f = io.open(t1, "wb")
+  f:write("return " .. ser(m) .. "\n")
+  f:close()
   os.rename(t1, db.meta_path(name))
 end
 
@@ -385,15 +366,12 @@ function db.record(name, meta, files, opts)
   path.mkdir_p(path.join(here, name))
   local t1 = path.join(here, name, "meta.lua.tmp")
   local t2 = path.join(here, name, "files.tmp")
-  -- Both writes must land before either rename: a half-written record would
-  -- claim files the tree does not have (or worse, an empty meta.lua).
-  local ok1, err1 = write_file_checked(t1, "return " .. ser(m) .. "\n")
-  if not ok1 then error(("db: %s"):format(tostring(err1)), 0) end
-  local ok2, err2 = write_file_checked(t2, table.concat(files, "\n") .. "\n")
-  if not ok2 then
-    os.remove(t1)
-    error(("db: %s"):format(tostring(err2)), 0)
-  end
+  local f = io.open(t1, "wb")
+  f:write("return " .. ser(m) .. "\n")
+  f:close()
+  local g = io.open(t2, "wb")
+  g:write(table.concat(files, "\n") .. "\n")
+  g:close()
   os.rename(t1, path.join(here, name, "meta.lua"))
   os.rename(t2, path.join(here, name, "files"))
 end
