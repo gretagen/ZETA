@@ -7,3 +7,5 @@ pkg.tar.zst (from arch/artix)
 and prebuilt tar.gz's and tar.xz.
 
 it is incredibly lightweight and is constantly maintained and updated.
+
+It also is alive.
