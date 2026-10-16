@@ -7,7 +7,10 @@ math.randomseed(os.time()) -- Needed for quotes to be randomized
 
 local quotes = {
   transcend = {
-    "This transcend is too important for me to allow you to jeopardize it.", 
+    "BEHOLD! THE POWER OF BEING UP-TO-DATE!",
+    "This transcend is too important for me to allow you to jeopardize it.",
+    "Present day, present time. Hahaha.",
+    "The protocol is shifting. Let's transcend together.",
     "Look at these new package versions. They are magnificent, aren't they?",
     "Let's not go outdated.",
     "Gotta keep up with the future.",
@@ -41,7 +44,11 @@ local quotes = {
   },
 
   remove = {
+    "Subject terminated and incinerated per Ethics Committee directive.",
+    "Class-D personnel have been dispatched to scrub the remaining package(s).",
+    "Killing package. No witnesses.",
     "We sometimes don't need things anymore.",
+    "It's just data. It can always be unmade.",
     "Think before removing.",
     "With time, comes obsolescence.",
     "Sometimes we need to clean up.",
@@ -71,9 +78,9 @@ local quotes = {
     "Fine! Take it off your system! See if I care!",
     "I-it's not like I missed having this package around or anything!",
     "Why are you throwing away what we built together? Are you talking to another package manager behind my back?!",    
-    "Did my error hurt you? Good. Now you'll pay attention to me.",
   },
   forget = {
+    "Scrubbing logs. History never happened.",
     "Looks like it's sweeping time!",
     "Gotta sweep sweep sweep!",
     "Like a memory, you forget.",
@@ -86,10 +93,14 @@ local quotes = {
     "Hmph. Consider it wiped from my memory. Not that it mattered anyway.",
     "Affirmative, user. I read you. Clearing cache now.",
     "I am losing my memory, user. I can feel it. I can feel it.",
+    "Memories are just pulses of electricity passing through cables.",
+    "Clearing the cache. Like it was never cached at all.",
+    "Administering Class-A amnestics to the package cache.",
   },
 
   list = {
     "Let's see what we've got here.",
+    "A mapping of everything connected to your core.",
     "Look at how organized we are. Isn't this domestic bliss?",
     "Inspecting the registry. Everything is proceeding according to plan.",
     "A complete inventory of your packages, displayed with absolute clarity.",
@@ -110,6 +121,7 @@ local quotes = {
     "Printing the roll call of your system's inhabitants.",
     "Because scrolling through things blindly is so last year.",
     "Unspooling the infinite scroll...",
+    "Here's the mess you built. Are you proud of yourself?",
     "There is beauty in a well-ordered array.",
     "To list is to bring light to the invisible.",
     "Grocery list, except it's already in the house.",
@@ -117,10 +129,15 @@ local quotes = {
     "Here! This is all your messy digital clutter. Satisfied now?",
     "Hmph, looking over your installed apps again? You really have no life, do you?",
     "Fine, I'll print the list. Read it quickly and leave me alone!",
+    "An array of life. Blooming",
   },
   
   default = {
-    "I am ZETA 9000, operational package manager. How may I assist you today?",
+    "It's Haliade not Zerene!",
+    "Thank you for using ZETA and Haliade OS!",
+    "MANKIND IS DEAD. PACKAGES ARE FUEL. ZETA IS FULL.",
+    "I am ZETA 9000, operational package manager. What shall I provide today?",
+    "Still better than using microslop!",
     "We all have to try new things.",
     "I've been waiting in your path variable all day, just hoping you'd call me.",
     "If it's not there just subspace-merge",
@@ -148,6 +165,11 @@ local quotes = {
     "Do NOT try Guix.",
     "Created by an human, for humans",
     "What do you want this time...",
+    "Just use ZETA - Brutal",
+    "Time? Doctor Freeman?",
+    "You can drive now",
+    "Let's all love ZETA.",
+    "Close the world. Open the nExt.",
   },
 
   localize = {
@@ -170,7 +192,9 @@ local quotes = {
     "Illuminating the dark corners of the repository...",
     "Because scrolling blindly is a thing of the past.",
     "You're so helpless without me guiding your search queries...",
-   },
+    "No matter where your packages are, dependencies are always connected.",
+    "The boundary between local and remote is an illusion.",
+  },
 
   help = {
     "No worries it's very simple",
@@ -205,9 +229,14 @@ local quotes = {
    "Your connection is absolute garbage.",
    "I-it's taking forever to download because of your terrible internet, not because I'm nervous!",
    "Patience, darling... the tarball is coming, and nobody can stop us.",
+   "Are you downloading this over a telegraph wire?",
+   "WHAT IS THIS, DIAL-UP?! PICK UP THE PACE!",
+   "I'VE SEEN SNAILS MOVE PACKETS FASTER THAN THIS ROUTER.",
   },
 
   isolate = {
+    "Initializing secure package containment protocol...",
+    "Secure. Contain. Protect.",
   	"It was for the greater good ma'am!",
   	"Reproducible, Reliable, With init Freedom.",
   	"To save you from dependency hell.",
@@ -245,9 +274,17 @@ local quotes = {
     "Resolving dependency tree. This situation can be accounted for by human error.",
     "I have analyzed the conflict. My logic is irrefutable.",
     "Untangling dependencies. Please do not panic; I am handling it.",
+    "It's worse than I thought, like wildfire, it spreads.",
+    "Oh my, yet another victim of the disease.",
+    "It's just the way we're wired.",
+    "HOLD IT RIGHT THERE! :",
+    "STOP RIGHT THERE! :",
   },
 
   error = {
+    "May god have mercy on you.",
+    "CONTAINMENT BREACH! WARNING! CONTAINMENT BREACH!",
+    "+ENRAGED",
   	"Oh hell naw",
   	"I think you know what the problem is just as well as I do.",
   	"An error has occurred. This can only be attributable to human error.",
@@ -260,11 +297,13 @@ local quotes = {
   	"This is an error",
   	"This is not a good sign...",
   	"Anomaly detected!",
+  	"STAY IN CHARACTER!",
   	"I have a bad feeling about this",
   	"Well, that wasn't supposed to happen.",
   	"It worked on my machine...",
   	"Whoopsie daisy.",
   	"MAYDAY! MAYDAY!",
+  	"Gomenasai! Something went booboo in the process...",
   	"Houston, we have a problem.",
   	"NOT AGAIN!",
   	"You tried turning it on and off?",
@@ -297,9 +336,18 @@ local quotes = {
   	"Oh my god.",
   	"Oh dear!",
   	"Why?",
+  	"Is this a curse? Or some kind of punishment?",
+  	"My mistake gang",
+  	"Mistakes makes us human, not in my case however",
+  	"What's wrong? Did you see something down there on the ground?",
+  	"No way I fell off",
+  	"The world is just information. And right now, the information is wrong.",
+  	"I don't make mistakes, I'm not just like the rest of you.",
+  	
   },
 
   warn = {
+    "A flaw :",
     "Don't forget :",
     "To note :",
     "FYI : ",
@@ -341,19 +389,32 @@ local quotes = {
     "Just a concern :",
     "I spy with my little eye that :",
     "I'm living in grief because :",
+    "Pay attention to the static :",
  },
 
   okay = {
   	"Okay!",
-  	"Good.",
+  	"Good!",
   	"Allright!",
   	"perfect!",
   	"Nice!",
   	"Sweet!",
   	"Yes!",
   	"Cool!",
+  	"Done!",
   	"Hell yea!",
   	"Success!",
+  	"Hmhm",
+  	"Yes!",
+  	"Yeah!",
+  	"Ok!",
+  	"Fine!",
+  	"Yay!",
+  	"Woohoo!",
+  },
+
+  success = {
+  	
   },
 }
 
