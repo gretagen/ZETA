@@ -7,7 +7,7 @@
 -- pipes or buffering layers, which keeps things fast.
 
 local log = {}
-
+local quotes = require("quotes")
 local quiet = false
 
 -- Per-file output suppression (--silence): kills the "provided file ..."
@@ -62,17 +62,28 @@ end
 
 function log.ok(msg)
   if quiet then return end
-  print(paint("green", " ok  " .. msg))
+  local q = quotes.is_enabled() and quotes.pick(quotes.okay) or nil
+  print(paint("green", " " .. (q or "ok") .. "  " .. msg))
 end
 
 function log.warn(msg)
   if quiet then return end
-  io.stderr:write(paint("yellow", "warn ") .. msg .. "\n")
+  local q = quotes.is_enabled() and quotes.pick(quotes.warn) or nil
+  if q then
+    io.stderr:write(paint("yellow", q) .. " " .. msg .. "\n")
+  else
+    io.stderr:write(paint("yellow", "warn") .. " " .. msg .. "\n")
+  end
 end
 
 function log.error(msg)
   if quiet then return end
-  io.stderr:write(paint("red", "error") .. " " .. msg .. "\n")
+  local q = quotes.is_enabled() and quotes.pick(quotes.error) or nil
+  if q then
+    io.stderr:write(paint("red", q) .. "\nCause : " .. msg .. "\n")
+  else
+    io.stderr:write(paint("red", "error") .. " " .. msg .. "\n")
+  end
 end
 
 function log.info(msg)

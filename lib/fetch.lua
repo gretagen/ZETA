@@ -53,7 +53,7 @@ end
 function fetch.downloader()
   if not downloader then
     if have("curl") then
-      downloader = "curl"
+      downloader = "curl --silent"
     elseif have("wget") then
       downloader = "wget"
     else
