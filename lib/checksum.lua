@@ -60,7 +60,7 @@ function checksum.verify(file, expected, opts)
     via = "pure-Lua sha256"
   end
   if not got then
-    return nil, ("could not compute sha256 for %s"):format(file)
+    return nil, ("couldn't compute sha256 for %s"):format(file)
   end
   log.detail(("checksum: %s = %s (%s)"):format(path.basename(file), got, via))
   if got ~= expected then

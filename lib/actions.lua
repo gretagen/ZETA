@@ -23,6 +23,7 @@ local hooks = require("hooks")
 local fetch = require("fetch")
 local spinner = require("spinner")
 local reserve = require("reserve")
+local quotes = require("quotes")
 
 local HELP = [[
 Zeta -- Haliade OS package manager
@@ -139,6 +140,7 @@ end
 -- unless it already lives as a dependency (a -ReProvide of a dependency stays
 -- a dependency); every other item becomes a dependency unless it is already
 -- an explicitly installed package (never demoted).
+
 local function plan_kind(item, target)
 	local cur = db.kind(item)
 	if item == target then
@@ -153,6 +155,7 @@ end
 -- flags.solve: reinstall a package's dependencies without touching the target.
 -- In system mode only the target's direct dependencies are reinstalled; with
 -- --isolate the whole store is rebuilt as a unit (target included).
+
 function actions._install(name, flags, opts)
 	local source = opts.source
 	local base = config.get().local_packages
@@ -188,6 +191,7 @@ function actions._install(name, flags, opts)
 	-- Prefetch all manifests in parallel (breadth-first discovery).
 	-- This replaces sequential per-package fetching with a single batch
 	-- download, significantly speeding up dependency resolution.
+
 	local manifest_cache = {}
 	local seen = { [name] = true }
 	local queue = { name }
@@ -318,7 +322,7 @@ function actions._install(name, flags, opts)
 	end
 	if #plan == 0 then
 		if solve then
-			log.info(("no dependencies to reinstall for %s"):format(name))
+			log.info(("no dependencies to reprovide for %s"):format(name))
 		end
 		return 0
 	end
@@ -352,11 +356,11 @@ function actions._install(name, flags, opts)
 	if solve and isolate then
 		confirm_msg = ("Rebuild the isolated store at %s (%d packages)?"):format(store, #plan)
 	elseif solve then
-		confirm_msg = ("Reinstall the %d direct dependencies of %s?"):format(#plan, name)
+		confirm_msg = ("Reprovide the %d direct dependencies of %s?"):format(#plan, name)
 	elseif isolate then
-		confirm_msg = ("Install %d package(s) isolated at %s?"):format(#plan, store)
+		confirm_msg = ("Provide %d package(s) isolated at %s?"):format(#plan, store)
 	else
-		confirm_msg = ("Install %d package(s)?"):format(#plan)
+		confirm_msg = ("Provided %d package(s)?"):format(#plan)
 	end
 	if not confirm(confirm_msg, flags.pass) then
 		log.info("aborted by user")
@@ -494,13 +498,13 @@ end
 -- must consciously drop the store before a system copy can replace it.
 local ISOLATED_CONFLICT_MSG = ("this package has already been installed as isolated! "
   .. "you will have to remove the isolated package first before reproviding it normally, "
-  .. "if you are sure about this, please use --force")
+  .. "if you are sure about this, please use --force flag")
 
 function actions.provide(names, flags)
 	for _, raw in ipairs(names) do
 		local name = path.sanitize_name(raw)
 		if not name then
-			log.error("invalid package name: " .. tostring(raw))
+			log.error("package name is not valid: " .. tostring(raw))
 			return 1
 		end
 		-- Isolated stores live in their own registry: a normal install of an
@@ -569,16 +573,16 @@ function actions.solve(names, flags)
 		if isolate then
 			if not db.isolated(name) then
 				if db.kind(name) then
-					log.error(("%s is installed normally -- use -Solve %s without --isolate."):format(name, name))
+					log.error(("%s is provided normally -- use -Solve %s without --isolate."):format(name, name))
 				else
-					log.error(("%s is not installed as isolated -- provide it with -Provide %s --isolate first."):format(name, name))
+					log.error(("%s is not provded as isolated -- provide it with -Provide %s --isolate first."):format(name, name))
 				end
 				return 1
 			end
 		else
 			if not db.kind(name) then
 				if db.isolated(name) then
-					log.error(("%s is installed as isolated -- use -Solve %s --isolate."):format(name, name))
+					log.error(("%s is provided as isolated -- use -Solve %s --isolate."):format(name, name))
 				else
 					log.error(("%s has not been provided."):format(name))
 				end
@@ -792,6 +796,7 @@ end
 -- System directories that must never be removed. This is a safety net: even
 -- if a package's file list contains these paths (due to legacy record-keeping),
 -- delete_files will refuse to unlink or rmdir them.
+
 local PROTECTED_DIRS = {}
 for _, d in ipairs({
   "/", "/bin", "/sbin", "/boot",
@@ -1020,7 +1025,7 @@ function actions.remove(names, flags)
   for _, n in ipairs(targets) do
     if not db.kind(n) then
       if db.isolated(n) then
-        log.error(("%s is installed as isolated -- use -Remove --isolate."):format(n))
+        log.error(("%s is provided as isolated -- use -Remove --isolate."):format(n))
       else
         log.error(("%s has not been provided."):format(n))
       end
@@ -1039,7 +1044,7 @@ function actions.remove(names, flags)
     for _, n in ipairs(targets) do
       local rd = remaining_dependents(n, planned)
       if #rd > 0 then
-        log.error(("Unable to remove %s as it is still required by %s if you are sure about this, use --force flag"):format(
+        log.error(("Unable to remove %s as it is still required by %s, if you are sure about this, use --force flag"):format(
           n, table.concat(rd, ", ")))
         return 1
       end
@@ -1163,7 +1168,7 @@ function actions.transcend(flags)
 	end
 
 	if #items == 0 then
-		log.info("no packages provided")
+		log.info("no packages have been provided")
 		return 0
 	end
 

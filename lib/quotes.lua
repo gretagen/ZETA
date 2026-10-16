@@ -414,7 +414,21 @@ local quotes = {
   },
 
   success = {
-  	
+  	"Transaction completed!",
+  	"Is that all?",
+  	"Well, my work's done here.",
+  	"Looks like my work here is done",
+  	"I'm done.",
+  	"Always here if you need anything else!",
+  },
+
+  userno = {
+  	"User refused.",
+  	"User said no",
+  	"User denied action",
+  	"Understandable.",
+  	"A wise decision.",
+  	"I get it",
   },
 }
 
