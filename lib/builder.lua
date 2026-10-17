@@ -40,9 +40,7 @@ local function cache_suffix(url)
   return url:match("%.([%w]+)$") or "bin"
 end
 
--- ---------------------------------------------------------------------------
 -- p object construction
--- ---------------------------------------------------------------------------
 
 local function find_tool(p, name)
   local path_env = p.env.PATH or BASE_PATH
@@ -200,9 +198,7 @@ local function make_p(manifest, dirs)
   return p
 end
 
--- ---------------------------------------------------------------------------
 -- Install pipeline
--- ---------------------------------------------------------------------------
 
 local function owned_rels(entries)
   local rels = {}
@@ -299,26 +295,46 @@ function builder.verify_payload(manifest, payload)
   end
 end
 
--- install(manifest, opts) -- opts: { force, source, local_dir, kind, pre_fetched,
---                                    isolate_root, record }
--- opts.kind is "package" for an explicit install or "dependency" for an
--- auto-installed dependency (see actions.lua); it decides which database
--- registry the entry lands in.
--- opts.pre_fetched is an optional path to an already-downloaded payload;
--- when set, obtain_payload is skipped and the given path is used directly.
--- opts.isolate_root is an explicit install root (the /zeta/reserve store for
--- an isolated package). When set, files commit into that root instead of
--- config.root, and the host linker cache is left alone.
--- opts.record (default true) controls the database write: dependency installs
--- into an isolated store are not registered (the whole store is removed as a
--- unit when the owning package is uninstalled).
-function builder.install(manifest, opts)
+-- verify_all(items) -- items: { { manifest = ..., payload = ... }, ... }
+--
+-- Batch sha256 verification of every downloaded payload. Runs before anything
+-- is unpacked or committed: a corrupt download aborts the run with the system
+-- untouched. Throws on the first mismatch.
+function builder.verify_all(items)
+  local pending = 0
+  for _, it in ipairs(items) do
+    if it.payload and it.manifest.sha256 then pending = pending + 1 end
+  end
+  if pending == 0 then return end
+  log.step("verifying sha256 of downloaded archives.")
+  for _, it in ipairs(items) do
+    local manifest, payload = it.manifest, it.payload
+    if payload then
+      if manifest.sha256 then
+        local ok, verr = checksum.verify(payload, manifest.sha256)
+        if not ok then error(tostring(verr), 0) end
+      elseif manifest.url and manifest.url:match("^https?://") then
+        log.warn(("no sha256 in manifest for %s; checksum not verified"):format(manifest.name))
+      end
+    end
+  end
+  log.ok("sha256 instances verified")
+end
+
+-- stage_one(manifest, opts) -> staged
+--
+-- Extract (or build) one package into a fresh staging tree and return the
+-- handle commit_one consumes: { stage = <dir>, work = <dir> }. Nothing
+-- outside the staging dirs is touched, so a failure here leaves the system
+-- exactly as it was. opts:
+--   payload    an already-downloaded payload path (from the fetch phase)
+--   verified   true when verify_all already checked the payload's sha256
+--   local_dir  local package directory for bare filenames
+-- Without a payload the payload is obtained (and verified) here.
+function builder.stage_one(manifest, opts)
   opts = opts or {}
   local cfg = config.get()
   local name = manifest.name
-  local dest_root = opts.isolate_root or cfg.root
-
-  log.step(("installing %s-%s"):format(name, manifest.version))
 
   -- Optional architecture gate: a binary package may declare `arch` and will
   -- then refuse to install on a mismatched machine.
@@ -345,9 +361,9 @@ function builder.install(manifest, opts)
 
   local ok, err = pcall(function()
     local payload
-    if opts.pre_fetched then
-      payload = opts.pre_fetched
-      builder.verify_payload(manifest, payload)
+    if opts.payload then
+      payload = opts.payload
+      if not opts.verified then builder.verify_payload(manifest, payload) end
     else
       payload = obtain_payload(p, manifest, opts.local_dir)
     end
@@ -377,9 +393,36 @@ function builder.install(manifest, opts)
       log.step(("running install function for %s"):format(name))
       manifest.install(p)
     end
+  end)
 
-    log.step(("committing files to %s"):format(dest_root))
-    local owned = commit.apply(stage, {
+  if not ok then
+    builder.discard_staged({ stage = stage, work = work })
+    error(("install of %s failed: %s"):format(name, tostring(err)), 0)
+  end
+  return { stage = stage, work = work }
+end
+
+-- discard_staged(staged) -- remove the staging tree produced by stage_one.
+function builder.discard_staged(staged)
+  if not staged then return end
+  if staged.work then path.run("rm -rf " .. path.quote(staged.work)) end
+  if staged.stage then path.run("rm -rf " .. path.quote(staged.stage)) end
+end
+
+-- commit_one(manifest, staged, opts)
+--
+-- Commit a staged tree to the target root and record it in the database.
+-- opts: { force, source, kind, isolate_root, record } (see install below).
+-- The staging tree is not removed here; the caller discards it.
+function builder.commit_one(manifest, staged, opts)
+  opts = opts or {}
+  local cfg = config.get()
+  local name = manifest.name
+  local dest_root = opts.isolate_root or cfg.root
+
+  local ok, err = pcall(function()
+    log.step(("committing files of %s-%s to %s"):format(name, manifest.version, dest_root))
+    local owned = commit.apply(staged.stage, {
       whitelist = manifest.files,
       force = opts.force,
       pkg_name = name,
@@ -409,15 +452,43 @@ function builder.install(manifest, opts)
     end
   end)
 
-  -- Always clean up staging + work dirs, even on failure.
-  path.run("rm -rf " .. path.quote(work))
-  path.run("rm -rf " .. path.quote(stage))
-
   if not ok then
     error(("install of %s failed: %s"):format(name, tostring(err)), 0)
   end
 
   log.ok(("provided %s-%s"):format(name, manifest.version))
+  return true
+end
+
+-- install(manifest, opts) -- the one-package pipeline: stage_one + commit_one.
+-- Batch flows (actions._install / actions.transcend) drive the phases
+-- themselves so every payload is verified and staged before the first file
+-- is committed; this wrapper is for single-package callers.
+-- opts: { force, source, local_dir, kind, pre_fetched, verified,
+--         isolate_root, record }
+-- opts.kind is "package" for an explicit install or "dependency" for an
+-- auto-installed dependency (see actions.lua); it decides which database
+-- registry the entry lands in.
+-- opts.pre_fetched is an optional path to an already-downloaded payload;
+-- when set, obtain_payload is skipped and the given path is used directly.
+-- opts.verified marks a pre_fetched payload as already sha256-verified (the
+-- batch flows check everything up front in verify_all).
+-- opts.isolate_root is an explicit install root (the /zeta/reserve store for
+-- an isolated package). When set, files commit into that root instead of
+-- config.root, and the host linker cache is left alone.
+-- opts.record (default true) controls the database write: dependency installs
+-- into an isolated store are not registered (the whole store is removed as a
+-- unit when the owning package is uninstalled).
+function builder.install(manifest, opts)
+  opts = opts or {}
+  local staged = builder.stage_one(manifest, {
+    local_dir = opts.local_dir,
+    payload = opts.pre_fetched,
+    verified = opts.verified,
+  })
+  local ok, err = pcall(builder.commit_one, manifest, staged, opts)
+  builder.discard_staged(staged)
+  if not ok then error(tostring(err), 0) end
   return true
 end
 

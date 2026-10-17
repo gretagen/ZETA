@@ -363,37 +363,8 @@ function actions._install(name, flags, opts)
 		confirm_msg = ("Provided %d package(s)?"):format(#plan)
 	end
 	if not confirm(confirm_msg, flags.pass) then
-		log.info("aborted by user")
+		log.abort("aborted by user")
 		return 0
-	end
-
-	-- A store is self-contained: nothing outside references its internals
-	-- (only profile wrappers, recreated below), so a reinstall starts clean.
-	-- Wiped only after the user confirmed. Wrappers of the previous
-	-- incarnation go first so a version upgrade cannot leave stale entries
-	-- pointing at a store that no longer exists.
-	if isolate then
-		local old = db.isolated_meta(name)
-		if old and old.reserve_root then
-			-- System links first: they are attributed by reading the wrapper
-			-- body, so the wrappers must still exist when we scan.
-			local nl = reserve.unlink_system(old.reserve_root)
-			if nl > 0 then
-				log.detail(("removed %d system link(s) from a previous install"):format(nl))
-			end
-			local n = reserve.unlink_profile(old.reserve_root)
-			if n > 0 then
-				log.detail(("removed %d stale profile wrapper(s)"):format(n))
-			end
-			if old.reserve_root ~= store then
-				local ok, err = reserve.remove_store(old.reserve_root)
-				if not ok then log.warn(tostring(err)) end
-			end
-		end
-		if path.exists(store) then
-			log.detail(("clearing previous store at %s"):format(store))
-			path.run("rm -rf " .. path.quote(store))
-		end
 	end
 
 	local installed = {}
@@ -436,28 +407,105 @@ function actions._install(name, flags, opts)
 		end
 	end
 
-	-- Phase 2: Build, commit, and record each package sequentially.
+	-- The work list: everything that is really going to be staged. An isolated
+	-- install stages the whole plan; a system install skips what is already
+	-- provided (unless --force says otherwise).
+	local todo = {}
 	for _, item in ipairs(plan) do
-		if not isolate and db.is_installed(item.name) and not flags.force then
-			log.warn(("%s already provided, skipping"):format(item.name))
+		if isolate or not (db.is_installed(item.name) and not flags.force) then
+			todo[#todo + 1] = item
 		else
-			local iok, ierr = pcall(builder.install, item.manifest, {
-				force = flags.force,
-				source = source,
-				local_dir = item.manifest._local_dir,
-				kind = plan_kind(item.name, name),
-				pre_fetched = pre_fetched[item.name],
-				isolate_root = store,
-				-- Only the target is registered; its deps are store internals
-				-- and disappear with the store on removal.
-				record = (not isolate) or item.name == name,
-			})
-			if not iok then
-				log.error(tostring(ierr))
-				return 1
-			end
-			installed[item.name] = true
+			log.warn(("%s already provided, skipping"):format(item.name))
 		end
+	end
+
+	-- Phase 2: Verify every downloaded payload before touching the system:
+	-- a corrupt archive aborts here, with nothing extracted or committed.
+	local verify_items = {}
+	for _, item in ipairs(todo) do
+		verify_items[#verify_items + 1] = {
+			manifest = item.manifest,
+			payload = pre_fetched[item.name],
+		}
+	end
+	local vok, verr = pcall(builder.verify_all, verify_items)
+	if not vok then
+		log.error(tostring(verr))
+		return 1
+	end
+
+	-- A store is self-contained: nothing outside references its internals
+	-- (only profile wrappers, recreated below), so a reinstall starts clean.
+	-- Wiped only after the user confirmed AND every payload checked out.
+	-- Wrappers of the previous incarnation go first so a version upgrade
+	-- cannot leave stale entries pointing at a store that no longer exists.
+	if isolate then
+		log.step("starting essentials.")
+		local old = db.isolated_meta(name)
+		if old and old.reserve_root then
+			-- System links first: they are attributed by reading the wrapper
+			-- body, so the wrappers must still exist when we scan.
+			local nl = reserve.unlink_system(old.reserve_root)
+			if nl > 0 then
+				log.detail(("removed %d system link(s) from a previous install"):format(nl))
+			end
+			local n = reserve.unlink_profile(old.reserve_root)
+			if n > 0 then
+				log.detail(("removed %d stale profile wrapper(s)"):format(n))
+			end
+			if old.reserve_root ~= store then
+				local ok, err = reserve.remove_store(old.reserve_root)
+				if not ok then log.warn(tostring(err)) end
+			end
+		end
+		if path.exists(store) then
+			log.detail(("clearing previous store at %s"):format(store))
+			path.run("rm -rf " .. path.quote(store))
+		end
+	end
+
+	-- Phase 3: Extract and build every package into its staging tree. Nothing
+	-- commits until every package has been staged successfully.
+	local staged = {}
+	local total = #todo
+	log.step(("Beginning extracts... - [ 0/%d ]"):format(total))
+	for i, item in ipairs(todo) do
+		local m = item.manifest
+		local payload = pre_fetched[item.name]
+		local label = payload and path.basename(payload) or (m.name .. "-" .. m.version)
+		log.step(("Extracting %s... - [ %d/%d ]"):format(label, i, total))
+		local sok, staged_item = pcall(builder.stage_one, m, {
+			local_dir = m._local_dir,
+			payload = payload,
+			verified = true,
+		})
+		if not sok then
+			for _, s in pairs(staged) do builder.discard_staged(s) end
+			log.error(tostring(staged_item))
+			return 1
+		end
+		staged[item.name] = staged_item
+	end
+
+	-- Phase 4: Commit and record each staged package, one by one.
+	for _, item in ipairs(todo) do
+		local iok, ierr = pcall(builder.commit_one, item.manifest, staged[item.name], {
+			force = flags.force,
+			source = source,
+			kind = plan_kind(item.name, name),
+			isolate_root = store,
+			-- Only the target is registered; its deps are store internals
+			-- and disappear with the store on removal.
+			record = (not isolate) or item.name == name,
+		})
+		builder.discard_staged(staged[item.name])
+		staged[item.name] = nil
+		if not iok then
+			for _, s in pairs(staged) do builder.discard_staged(s) end
+			log.error(tostring(ierr))
+			return 1
+		end
+		installed[item.name] = true
 	end
 
 	-- Isolated: stamp the store's ELF objects with store RPATHs (so wrappers
@@ -981,7 +1029,7 @@ function actions.remove_isolated(names, flags)
 
   local noun = #plan == 1 and "1 isolated package" or (#plan .. " isolated packages")
   if not confirm(("Remove %s?"):format(noun), flags.pass, " [y/N]", true) then
-    log.info("aborted by user")
+    log.abort("aborted by user")
     return 0
   end
 
@@ -1125,7 +1173,7 @@ function actions.remove(names, flags)
   -- 7) Single confirmation, default NO.
   local noun = #plan == 1 and "1 package" or (#plan .. " packages")
   if not confirm(("Remove %s?"):format(noun), flags.pass, " [y/N]", true) then
-    log.info("aborted by user")
+    log.abort("aborted by user")
     return 0
   end
 
@@ -1232,7 +1280,7 @@ function actions.transcend(flags)
 	print("")
 
 	if not confirm(("Transcend %d package(s)?"):format(#upgrades), flags.pass) then
-		log.info("aborted by user")
+		log.abort("aborted by user")
 		return 0
 	end
 
@@ -1270,15 +1318,53 @@ function actions.transcend(flags)
 		end
 	end
 
-	-- Phase 3: Build, commit, and record each package sequentially.
+	-- Phase 3: Verify every downloaded payload before touching the system:
+	-- a corrupt archive aborts here, with nothing extracted or committed.
+	local verify_items = {}
 	for _, u in ipairs(upgrades) do
-		local iok, ierr = pcall(builder.install, u.manifest, {
+		verify_items[#verify_items + 1] = {
+			manifest = u.manifest,
+			payload = pre_fetched[u.name],
+		}
+	end
+	local vok, verr = pcall(builder.verify_all, verify_items)
+	if not vok then
+		log.error(tostring(verr))
+		return 1
+	end
+
+	-- Phase 4: Extract and build every upgrade into its staging tree. Nothing
+	-- commits until every package has been staged successfully.
+	local staged = {}
+	local total = #upgrades
+	log.step(("Beginning extracts... - [ 0/%d ]"):format(total))
+	for i, u in ipairs(upgrades) do
+		local payload = pre_fetched[u.name]
+		local label = payload and path.basename(payload) or (u.name .. "-" .. u.to)
+		log.step(("Extracting %s... - [ %d/%d ]"):format(label, i, total))
+		local sok, staged_item = pcall(builder.stage_one, u.manifest, {
+			payload = payload,
+			verified = true,
+		})
+		if not sok then
+			for _, s in pairs(staged) do builder.discard_staged(s) end
+			log.error(tostring(staged_item))
+			return 1
+		end
+		staged[u.name] = staged_item
+	end
+
+	-- Phase 5: Commit and record each staged upgrade, one by one.
+	for _, u in ipairs(upgrades) do
+		local iok, ierr = pcall(builder.commit_one, u.manifest, staged[u.name], {
 			force = true,
 			source = "remote",
 			kind = db.kind(u.name) or "package",
-			pre_fetched = pre_fetched[u.name],
 		})
+		builder.discard_staged(staged[u.name])
+		staged[u.name] = nil
 		if not iok then
+			for _, s in pairs(staged) do builder.discard_staged(s) end
 			log.error(tostring(ierr))
 			return 1
 		end
@@ -1289,7 +1375,7 @@ end
 function actions.forget(pass)
 	local cfg = config.get()
 	if not confirm("Remove all cached packages?", pass, " [y/N]", true) then
-		log.info("aborted by user")
+		log.abort("aborted by user")
 		return 0
 	end
 	path.run("rm -rf " .. path.quote(cfg.cache_dir) .. "/*")

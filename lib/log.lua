@@ -86,6 +86,15 @@ function log.error(msg)
   end
 end
 
+-- A refused confirmation: a random userno quote ("User refused.",
+-- "A wise decision.", ...) stands in for the message. `msg` is only the
+-- fallback shown when quotes are disabled (--no-quote / quotes = false).
+function log.abort(msg)
+  if quiet then return end
+  local q = quotes.is_enabled() and quotes.pick(quotes.userno) or nil
+  print(" -   " .. (q or (msg or "aborted by user")))
+end
+
 function log.info(msg)
   if quiet then return end
   print(" -   " .. msg)

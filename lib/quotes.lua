@@ -429,6 +429,7 @@ local quotes = {
   	"Understandable.",
   	"A wise decision.",
   	"I get it",
+  	"But it refused.",
   },
 }
 
