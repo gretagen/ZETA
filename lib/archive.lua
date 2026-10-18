@@ -18,6 +18,15 @@
 
 local archive = {}
 
+-- Package metadata entries carried by Arch/Artix (and some legacy Haliade
+-- repacks that tarred extracted Arch trees whole). They are packaging
+-- bookkeeping, never payload: extraction drops them and the root-file check
+-- ignores them wherever an archive format's dispatch missed them (plain
+-- .tar.gz archives that actually contain an Arch layout).
+local METADATA_MEMBERS = { ".PKGINFO", ".MTREE", ".BUILDINFO", ".INSTALL" }
+local METADATA_SET = {}
+for _, m in ipairs(METADATA_MEMBERS) do METADATA_SET[m] = true end
+
 local path = require("path")
 local log = require("log")
 local config = require("config")
@@ -181,7 +190,14 @@ local function check_root_files(entries, strip)
   end
   for _, e in ipairs(entries) do
     if e.type ~= "dir" and separators(e.raw or e.path) <= strip then
-      return nil, ("archive member %q would extract as a top-level file at the destination root"):format(e.path)
+      local base = (e.path or ""):match("([^/]+)$")
+      if METADATA_SET[base] then
+        -- package metadata (e.g. ./.BUILDINFO in legacy repacks): dropped
+        -- at extraction, never a stray root file.
+        log.detail(("archive: ignoring package metadata member %q"):format(e.path))
+      else
+        return nil, ("archive member %q would extract as a top-level file at the destination root"):format(e.path)
+      end
     end
   end
   return true
@@ -229,6 +245,11 @@ function archive.extract_tar(archive_file, dest, opts)
   for _, glob in ipairs(opts.exclude or {}) do
     cmd = cmd .. " --exclude=" .. path.quote(glob)
   end
+  -- Never write package metadata, whatever the archive is named (see
+  -- METADATA_MEMBERS; unanchored tar patterns match any path suffix).
+  for _, glob in ipairs(METADATA_MEMBERS) do
+    cmd = cmd .. " --exclude=" .. path.quote(glob)
+  end
   if strip > 0 then
     cmd = cmd .. " --strip-components=" .. tostring(strip)
   end
@@ -268,7 +289,7 @@ function archive.extract_arch_pkg(archive_file, dest, opts)
   local listing = log.is_file_silent() and "-xf" or "-xvf"
   local cmd = TAR_ENV .. " tar " .. listing .. " " .. path.quote(archive_file)
     .. " -C " .. path.quote(dest) .. " --no-same-owner"
-  for _, glob in ipairs({ ".PKGINFO", ".MTREE", ".BUILDINFO", ".INSTALL" }) do
+  for _, glob in ipairs(METADATA_MEMBERS) do
     cmd = cmd .. " --exclude=" .. path.quote(glob)
   end
   if strip > 0 then
