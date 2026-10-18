@@ -172,20 +172,22 @@ local function check_libraries(files, root)
 	if not where or where == "" then return end
 
 	log.step("Checking if libraries resolve.")
-	local missing = 0
+	local unresolved = {}
 	for _, bin in ipairs(bins) do
 		if #bins > 1 then log.detail(bin) end
 		local f = path.popen("ldd " .. path.quote(bin) .. " 2>/dev/null")
 		if f then
 			for line in f:lines() do
 				print(line)
-				if line:find("not found", 1, true) then missing = missing + 1 end
+				local name = line:match("^%s*(%S+)%s+=>%s+not found")
+				if name then unresolved[#unresolved + 1] = name end
 			end
 			f:close()
 		end
 	end
-	if missing > 0 then
-		log.warn(("%d Libraries unresolved, you may need to report to package maintenance."):format(missing))
+	if #unresolved > 0 then
+		log.warn(("%d Libraries unresolved, you may need to report to package maintenance."):format(#unresolved))
+		print(("unresolved libraries : %s,"):format(table.concat(unresolved, ", ")))
 	else
 		log.ok("all libraries resolve")
 	end
