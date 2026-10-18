@@ -4,7 +4,7 @@
 -- (-Provide, -LocalProvide, -ReProvide, -Solve, -Remove, -List, -Localize,
 -- -Help). Match is case-insensitive so -provide and -PROVIDE also work. Flags
 -- start with a double dash (--pass, --force, --with-deps, --detail,
--- --silence, --help).
+-- --silence, --jobs, --help).
 -- Install/remove commands accept one or more package names.
 
 local cli = {}
@@ -47,14 +47,16 @@ local MIN_ARGS = {
   remove = 1,
 }
 
--- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps, detail, silence, dir, files_path, version } }.
+-- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps, detail, silence, no_quote, isolate, jobs, dir, files_path, version } }.
 -- Returns nil, errmsg on any parse problem.
 function cli.parse(args)
   local cmd
   local pos = {}
-  local flags = { pass = false, force = false, with_deps = false, detail = false, silence = false, no_quote = false, isolate = false }
+  local flags = { pass = false, force = false, with_deps = false, detail = false, silence = false, no_quote = false, isolate = false, jobs = nil }
 
-  for _, a in ipairs(args) do
+  local i = 1
+  while i <= #args do
+    local a = args[i]
     if a:match("^%-%-") then
       local key, val = a:match("^%-%-([^=]+)=?(.*)")
       if key == "pass" then
@@ -75,6 +77,17 @@ function cli.parse(args)
         flags.no_quote = true
       elseif key == "isolate" then
         flags.isolate = true
+      elseif key == "jobs" then
+        -- Accepts --jobs=N and --jobs N alike.
+        if val == "" then
+          i = i + 1
+          val = args[i] or ""
+        end
+        local n = tonumber(val)
+        if not n or n < 1 or n ~= math.floor(n) then
+          return nil, ("--jobs expects a positive integer, got %q"):format(val)
+        end
+        flags.jobs = n
       elseif key == "help" then
         cmd = "help"
       elseif key == "dir" then
@@ -99,6 +112,7 @@ function cli.parse(args)
     else
       pos[#pos + 1] = a
     end
+    i = i + 1
   end
 
   if not cmd then

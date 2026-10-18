@@ -40,9 +40,37 @@ local function getenv(k)
   return os.getenv(k)
 end
 
+-- The machine's core count, for `jobs = nproc`. Probed from `nproc`, then
+-- `getconf`, then /proc/cpuinfo; falls back to the default pool size.
+local function core_count()
+  for _, cmd in ipairs({ "nproc", "getconf _NPROCESSORS_ONLN" }) do
+    local f = path.popen(cmd .. " 2>/dev/null")
+    if f then
+      local n = tonumber(f:read("*l"))
+      f:close()
+      if n and n >= 1 then return math.floor(n) end
+    end
+  end
+  local f = io.open("/proc/cpuinfo", "rb")
+  if f then
+    local n = 0
+    for line in f:lines() do
+      if line:match("^processor%s*:") then n = n + 1 end
+    end
+    f:close()
+    if n >= 1 then return n end
+  end
+  return 2
+end
+
 -- Load a Lua config file that returns a table. Returns the table or nil.
+-- While the file runs, the global `nproc` holds the machine's core count so
+-- `jobs = nproc` uses every core.
 local function load_config_file(filepath)
+  local saved_nproc = rawget(_G, "nproc")
+  _G.nproc = core_count()
   local ok, result = pcall(dofile, filepath)
+  _G.nproc = saved_nproc
   if ok and type(result) == "table" then
     return result
   end
@@ -95,6 +123,17 @@ local function resolve_repos(cfg_file)
   return { "https://github.com/gretagen/zeta-index" }
 end
 
+-- Resolve the commit pool size: how many packages may be "provided" at the
+-- same time. ZETA_JOBS (env) > config file `jobs` > default 2. The value
+-- "nproc" (or the nproc global in the config file) means every core.
+local function resolve_jobs(cfg_file)
+  local env = getenv("ZETA_JOBS")
+  if env == "nproc" then return core_count() end
+  local v = tonumber(env) or (cfg_file and tonumber(cfg_file.jobs))
+  if v and v >= 1 then return math.floor(v) end
+  return 2
+end
+
 function config.load(script_dir)
   if script_dir then _script_dir = script_dir end
 
@@ -120,6 +159,7 @@ function config.load(script_dir)
     state_dir = getenv("ZETA_STATE") or (cfg_file and cfg_file.state_dir) or under("var/db/zeta"),
     tmp_dir = getenv("ZETA_TMP") or (cfg_file and cfg_file.tmp_dir) or under("var/tmp/zeta"),
     reserve_dir = getenv("ZETA_RESERVE") or (cfg_file and cfg_file.reserve_dir) or under("zeta/reserve"),
+    jobs = resolve_jobs(cfg_file),
     verbose = (getenv("ZETA_VERBOSE") == "1" or getenv("ZETA_VERBOSE") == "true")
               or (cfg_file and cfg_file.verbose == true)
               or false,

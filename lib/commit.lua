@@ -60,12 +60,12 @@ local function walk_staging(staging)
   return out
 end
 
--- apply(staging, opts) -> owned entries (files + symlinks + dirs).
--- opts: whitelist (list of rel paths to commit), force, pkg_name,
---       root (explicit install root — overrides config; set for isolated
---       installs so the host filesystem and linker cache are never touched).
-function commit.apply(staging, opts)
-  opts = opts or {}
+-- collect_owned(staging, whitelist) -> owned entries, ordered
+--
+-- The staged-tree walk, validation, whitelist filter and owned-entry
+-- computation shared by apply and count_owned. Non-symlinks come before
+-- symlinks (see the note below), so the caller can commit in this order.
+local function collect_owned(staging, whitelist)
   local entries = walk_staging(staging)
 
   -- Validate every staged entry BEFORE anything is copied: relative paths
@@ -82,18 +82,15 @@ function commit.apply(staging, opts)
     end
   end
 
-  if opts.whitelist then
+  if whitelist then
     local wl = {}
-    for _, w in ipairs(opts.whitelist) do wl[w] = true end
+    for _, w in ipairs(whitelist) do wl[w] = true end
     local filtered = {}
     for _, e in ipairs(entries) do
       if e.type == "dir" or wl[e.rel] then filtered[#filtered + 1] = e end
     end
     entries = filtered
   end
-
-  local root = opts.root or config.get().root
-  local isolated = opts.root ~= nil
 
   -- Owned entries are all concrete paths a package ships. Filter out directory
   -- entries that are prefixes of other entries: if a package owns usr/bin/hello,
@@ -140,6 +137,46 @@ function commit.apply(staging, opts)
   owned = non_sym
   for _, e in ipairs(sym) do owned[#owned + 1] = e end
 
+  return owned
+end
+
+-- count_owned(staging, whitelist) -> number of entries apply would commit.
+-- The batch commit draws one aggregate counter across every package and
+-- needs the denominator before the first file moves.
+function commit.count_owned(staging, whitelist)
+  return #collect_owned(staging, whitelist)
+end
+
+-- counter(done, total, final) -- the "[ provided X | T entries ]" line the
+-- batch commit redraws across the whole transaction: written in place, and
+-- settled with a newline when final.
+function commit.counter(done, total, final)
+  local n = paint(final and "green" or "blue", tostring(done))
+  local tot = paint("cyan", tostring(total))
+  if final then
+    io.write(("\r\27[K  [ provided %s | %s entries ]\n"):format(n, tot))
+  else
+    io.write(("\r\27[K  [ provided %s | %s entries ]"):format(n, tot))
+  end
+  io.flush()
+end
+
+-- apply(staging, opts) -> owned entries (files + symlinks + dirs).
+-- opts: whitelist (list of rel paths to commit), force, pkg_name,
+--       root (explicit install root — overrides config; set for isolated
+--       installs so the host filesystem and linker cache are never touched),
+--       defer_system (skip the linker-cache/schema work here; the caller runs
+--       commit.run_system_ops once at the end of the transaction),
+--       on_progress (called as (done, total) after every committed entry;
+--       when set, the caller owns all progress output and the per-type
+--       summary, and apply prints neither).
+function commit.apply(staging, opts)
+  opts = opts or {}
+  local owned = collect_owned(staging, opts.whitelist)
+
+  local root = opts.root or config.get().root
+  local isolated = opts.root ~= nil
+
   -- When the target path is a symlink (e.g. /sbin -> usr/sbin from the
   -- filesystem package), create the real directory the link points at
   -- instead: mkdir -p refuses to follow a dangling symlink. Targets are
@@ -157,9 +194,11 @@ function commit.apply(staging, opts)
 
   -- Copy phase. Non-verbose TTY mode shows a live updating progress line
   -- that overwrites itself in place. Verbose mode shows detailed per-file
-  -- messages. Non-TTY mode skips per-file output entirely.
+  -- messages. Non-TTY mode skips per-file output entirely. With an
+  -- on_progress callback the caller owns all progress output.
   local verbose = config.get().verbose
   local use_tty = spinner.enabled()
+  local batch = opts.on_progress ~= nil
   local total = #owned
   local done = 0
   local file_count, sym_count, dir_count = 0, 0, 0
@@ -198,9 +237,11 @@ function commit.apply(staging, opts)
       end
     end
 
-    -- Live progress line (TTY only, non-verbose, non-meta-package).
-    if use_tty and not verbose and total > 0 then
-      done = done + 1
+    -- Progress: the caller's counter (batch mode) or a live TTY line.
+    done = done + 1
+    if opts.on_progress then
+      opts.on_progress(done, total)
+    elseif use_tty and not verbose and total > 0 then
       local n = paint("blue", tostring(done))
       local tot = paint("cyan", tostring(total))
       local p = paint("dim", e.rel)
@@ -220,30 +261,63 @@ function commit.apply(staging, opts)
     end
   end
 
-  -- Clear the progress line and show final count in green.
-  if use_tty and not verbose and total > 0 then
+  -- Final count line, replacing the live line in place. Batch mode leaves the
+  -- counter to the caller.
+  if not batch and not verbose and total > 0 and use_tty then
     local n = paint("green", tostring(total))
     local tot = paint("cyan", tostring(total))
     io.write(("\r\27[K  [ provided %s | %s entries ]\n"):format(n, tot))
     io.flush()
   end
 
-  -- Per-type summary.
-  if file_count > 0 then
-    log.info(("- committed %d files to %s"):format(file_count, root))
+  -- Per-type summary (batch mode: the caller prints one aggregate summary).
+  if not batch then
+    if file_count > 0 then
+      log.info(("- committed %d files to %s"):format(file_count, root))
+    end
+    if sym_count > 0 then
+      log.info(("- committed %d symlinks to %s"):format(sym_count, root))
+    end
+    if dir_count > 0 then
+      log.info(("- committed %d dirs to %s"):format(dir_count, root))
+    end
   end
-  if sym_count > 0 then
-    log.info(("- committed %d symlinks to %s"):format(sym_count, root))
+
+  -- Whether any GSettings schemas shipped (the compile itself is part of the
+  -- system ops below).
+  local has_schema = false
+  for _, e in ipairs(owned) do
+    if e.rel:match("^usr/share/glib%-2%.0/schemas/.+%.gschema%.xml$") then
+      has_schema = true
+      break
+    end
   end
-  if dir_count > 0 then
-    log.info(("- committed %d dirs to %s"):format(dir_count, root))
+
+  -- System-wide side effects run once per transaction (see run_system_ops);
+  -- a pool commit defers them so two workers can never collide.
+  if not opts.defer_system then
+    commit.run_system_ops({ root = root, isolated = isolated, schemas = has_schema })
   end
+
+  return owned
+end
+
+-- run_system_ops(opts) -- opts: { root, isolated, schemas }
+--
+-- The system-wide side effects of a commit, run ONCE per transaction after
+-- every package is in place: the linker cache (ld.so.conf snippet + ldconfig)
+-- and GSettings schema compilation. Two concurrent commits must never race on
+-- /etc/ld.so.cache~ or gschemas.compiled, so the commit pool defers these
+-- here instead of running them per package.
+function commit.run_system_ops(opts)
+  opts = opts or {}
+  local root = opts.root or config.get().root
 
   -- Linker cache maintenance only applies to the real system root: an
   -- isolated store never touches the host's ld.so.conf or ld.so.cache (its
   -- binaries resolve libraries through their store RPATHs, with the profile
   -- wrapper's LD_LIBRARY_PATH as fallback).
-  if not isolated then
+  if not opts.isolated then
     -- Ensure the dynamic linker knows about /usr/lib and /lib. The default
     -- ld.so.conf only lists /usr/local/lib and /opt/lib; without these paths
     -- ldconfig cannot populate the cache for libraries installed by ZETA.
@@ -269,15 +343,8 @@ function commit.apply(staging, opts)
 
   -- Auto-compile GSettings schemas if any were installed (rooted at whatever
   -- root is in use, so isolated stores get their own gschemas.compiled).
-  local schemas_dir = root .. "/usr/share/glib-2.0/schemas"
-  local has_schema = false
-  for _, e in ipairs(owned) do
-    if e.rel:match("^usr/share/glib%-2%.0/schemas/.+%.gschema%.xml$") then
-      has_schema = true
-      break
-    end
-  end
-  if has_schema then
+  if opts.schemas then
+    local schemas_dir = root .. "/usr/share/glib-2.0/schemas"
     local compile = "glib-compile-schemas " .. path.quote(schemas_dir)
     log.step("compiling GSettings schemas")
     if path.run(compile) then
@@ -286,8 +353,6 @@ function commit.apply(staging, opts)
       log.warn("glib-compile-schemas failed (non-fatal)")
     end
   end
-
-  return owned
 end
 
 return commit

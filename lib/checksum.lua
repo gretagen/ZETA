@@ -64,7 +64,8 @@ function checksum.verify(file, expected, opts)
   end
   log.detail(("checksum: %s = %s (%s)"):format(path.basename(file), got, via))
   if got ~= expected then
-    return nil, ("sha256 mismatch for %s:\n  expected %s\n  got      %s"):format(
+    return nil, ("sha256 mismatch for %s:\n  expected %s\n  got      %s\n" ..
+      "I recommend you report this to package maintenance."):format(
       path.basename(file), expected, got)
   end
   return true, got

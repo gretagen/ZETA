@@ -66,6 +66,9 @@ Flags:
                           With -Remove: delete the isolated store instead of
                           the system copy.
   --no-quote              Disable random startup quotes
+  --jobs=N                How many packages may be provided at the same time
+                          (default: 2; `jobs = nproc` in the config file
+                          uses every core)
 
 Configuration:
   /etc/zeta/configuration.lua   System-wide configuration (Lua table)
@@ -80,6 +83,7 @@ Configuration:
       root = "/",
       verbose = false,
       quotes = false,
+      jobs = nproc, -- every core (or a plain number)
     }
 
 Installed state is tracked in three registries under /var/db/zeta:
@@ -97,6 +101,7 @@ Environment:
   ZETA_STATE           Package database                              (default: $ZETA_ROOT/var/db/zeta)
   ZETA_VERBOSE         Verbose output (1 or true to enable)          (default: false)
   ZETA_RESERVE         Isolated package store location               (default: $ZETA_ROOT/zeta/reserve)
+  ZETA_JOBS            Packages provided at the same time (or "nproc")  (default: 2)
 
 Package format (one package.lua per package, returning a table):
   return {
@@ -134,6 +139,56 @@ local function confirm(msg, pass, suffix, default_no)
   line = line:lower()
   if line == "" then return not default_no end
   return line == "y" or line == "yes"
+end
+
+-- Closing lines of a completed run: the completion banner, a random success
+-- quote (unless quotes are disabled), and what was done in parentheses.
+local function finish(done_line)
+	log.step("Complete.")
+	if quotes.is_enabled() then
+		local q = quotes.pick(quotes.success)
+		if q then print(q) end
+	end
+	print(done_line)
+end
+
+-- Post-install sanity check: run ldd over the package's binaries and report
+-- any shared library that does not resolve. Non-fatal by design -- a missing
+-- library is a packaging problem to report, not a failed install.
+local function check_libraries(files, root)
+	local bins = {}
+	for _, rel in ipairs(files or {}) do
+		if rel:match("^usr/bin/") or rel:match("^usr/sbin/")
+			 or rel:match("^bin/") or rel:match("^sbin/") then
+			bins[#bins + 1] = path.join(root, rel)
+		end
+	end
+	if #bins == 0 then return end
+	-- No ldd on this system: skip the check quietly.
+	local probe = path.popen("command -v ldd 2>/dev/null")
+	if not probe then return end
+	local where = probe:read("*l")
+	probe:close()
+	if not where or where == "" then return end
+
+	log.step("Checking if libraries resolve.")
+	local missing = 0
+	for _, bin in ipairs(bins) do
+		if #bins > 1 then log.detail(bin) end
+		local f = path.popen("ldd " .. path.quote(bin) .. " 2>/dev/null")
+		if f then
+			for line in f:lines() do
+				print(line)
+				if line:find("not found", 1, true) then missing = missing + 1 end
+			end
+			f:close()
+		end
+	end
+	if missing > 0 then
+		log.warn(("%d Libraries unresolved, you may need to report to package maintenance."):format(missing))
+	else
+		log.ok("all libraries resolve")
+	end
 end
 
 -- The database kind for a plan item: the explicit target becomes a package
@@ -487,24 +542,32 @@ function actions._install(name, flags, opts)
 		staged[item.name] = staged_item
 	end
 
-	-- Phase 4: Commit and record each staged package, one by one.
+	-- Phase 4: Commit and record each staged package. Up to N provides run at
+	-- a time; the next one starts as soon as a slot frees.
+	local commit_items = {}
 	for _, item in ipairs(todo) do
-		local iok, ierr = pcall(builder.commit_one, item.manifest, staged[item.name], {
-			force = flags.force,
-			source = source,
+		commit_items[#commit_items + 1] = {
+			manifest = item.manifest,
+			staged = staged[item.name],
 			kind = plan_kind(item.name, name),
+			source = source,
 			isolate_root = store,
 			-- Only the target is registered; its deps are store internals
 			-- and disappear with the store on removal.
 			record = (not isolate) or item.name == name,
-		})
-		builder.discard_staged(staged[item.name])
-		staged[item.name] = nil
-		if not iok then
-			for _, s in pairs(staged) do builder.discard_staged(s) end
-			log.error(tostring(ierr))
-			return 1
-		end
+			-- The target's "provided" line is folded into the closing block.
+			announce = item.name ~= name,
+		}
+	end
+	local cok, cerr = builder.commit_all(commit_items, {
+		force = flags.force,
+		jobs = flags.jobs or config.get().jobs,
+	})
+	if not cok then
+		log.error(tostring(cerr))
+		return 1
+	end
+	for _, item in ipairs(todo) do
 		installed[item.name] = true
 	end
 
@@ -530,6 +593,10 @@ function actions._install(name, flags, opts)
 		end
 	end
 
+	-- Library resolution check: ldd over the target's binaries. Non-fatal.
+	check_libraries(isolate and db.isolated_files(name) or db.files(name),
+		isolate and store or config.get().root)
+
 	-- Post-transaction hooks (deps already present on disk at this point).
 	-- Isolated stores never run host hooks: hooks are system-level.
 	if next(installed) and not isolate then
@@ -538,6 +605,8 @@ function actions._install(name, flags, opts)
 			log.error("hook runner failed")
 		end
 	end
+
+	finish(("(provided %s-%s)"):format(name, target_manifest and target_manifest.version or "?"))
 	return 0
 end
 
@@ -1354,21 +1423,31 @@ function actions.transcend(flags)
 		staged[u.name] = staged_item
 	end
 
-	-- Phase 5: Commit and record each staged upgrade, one by one.
+	-- Phase 5: Commit and record each staged upgrade. Up to N provides run at
+	-- a time; the next one starts as soon as a slot frees.
+	local commit_items = {}
 	for _, u in ipairs(upgrades) do
-		local iok, ierr = pcall(builder.commit_one, u.manifest, staged[u.name], {
-			force = true,
+		commit_items[#commit_items + 1] = {
+			manifest = u.manifest,
+			staged = staged[u.name],
 			source = "remote",
 			kind = db.kind(u.name) or "package",
-		})
-		builder.discard_staged(staged[u.name])
-		staged[u.name] = nil
-		if not iok then
-			for _, s in pairs(staged) do builder.discard_staged(s) end
-			log.error(tostring(ierr))
-			return 1
-		end
+		}
 	end
+	local cok, cerr = builder.commit_all(commit_items, {
+		force = true,
+		jobs = flags.jobs or config.get().jobs,
+	})
+	if not cok then
+		log.error(tostring(cerr))
+		return 1
+	end
+	-- Library resolution check for every upgraded package that shipped
+	-- binaries. Non-fatal.
+	for _, u in ipairs(upgrades) do
+		check_libraries(db.files(u.name), config.get().root)
+	end
+	finish(("(transcended %d package(s))"):format(#upgrades))
 	return 0
 end
 

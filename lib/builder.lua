@@ -25,6 +25,7 @@ local checksum = require("checksum")
 local archive = require("archive")
 local commit = require("commit")
 local db = require("db")
+local spinner = require("spinner")
 
 -- Minimal, deliberately small PATH for subprocesses. Build tools must be
 -- declared as dependencies of the package; we never inherit a host PATH.
@@ -200,12 +201,6 @@ end
 
 -- Install pipeline
 
-local function owned_rels(entries)
-  local rels = {}
-  for _, e in ipairs(entries) do rels[#rels + 1] = e.rel end
-  return rels
-end
-
 -- Number of entries (files + dirs) below `dir`, 0 if empty or unreadable.
 -- Used by -Test's structural check to prove the pipeline produced something.
 local function count_tree(dir)
@@ -324,7 +319,7 @@ end
 -- stage_one(manifest, opts) -> staged
 --
 -- Extract (or build) one package into a fresh staging tree and return the
--- handle commit_one consumes: { stage = <dir>, work = <dir> }. Nothing
+-- handle commit_all consumes: { stage = <dir>, work = <dir> }. Nothing
 -- outside the staging dirs is touched, so a failure here leaves the system
 -- exactly as it was. opts:
 --   payload    an already-downloaded payload path (from the fetch phase)
@@ -409,63 +404,393 @@ function builder.discard_staged(staged)
   if staged.stage then path.run("rm -rf " .. path.quote(staged.stage)) end
 end
 
--- commit_one(manifest, staged, opts)
+-- commit_placement(name, version, staging, opts) -> owned entries
 --
--- Commit a staged tree to the target root and record it in the database.
--- opts: { force, source, kind, isolate_root, record } (see install below).
--- The staging tree is not removed here; the caller discards it.
-function builder.commit_one(manifest, staged, opts)
+-- The file-placement half of a commit -- what a worker process runs. All
+-- output belongs to the caller (see commit.apply's on_progress): the batch
+-- commit draws one aggregate header and counter. System-wide side effects
+-- are deferred to commit.run_system_ops so concurrent commits can never
+-- collide on them. opts: { root, whitelist, force, on_progress }.
+function builder.commit_placement(name, version, staging, opts)
   opts = opts or {}
-  local cfg = config.get()
-  local name = manifest.name
-  local dest_root = opts.isolate_root or cfg.root
+  return commit.apply(staging, {
+    whitelist = opts.whitelist,
+    force = opts.force,
+    pkg_name = name,
+    root = opts.root,
+    defer_system = true,
+    on_progress = opts.on_progress,
+  })
+end
 
-  local ok, err = pcall(function()
-    log.step(("committing files of %s-%s to %s"):format(name, manifest.version, dest_root))
-    local owned = commit.apply(staged.stage, {
-      whitelist = manifest.files,
-      force = opts.force,
-      pkg_name = name,
-      root = opts.isolate_root,
-    })
+-- commit_record(manifest, rels, opts) -- the parent-side half: the database
+-- write. opts (normally the item table): { source, kind, isolate_root,
+-- record }.
+function builder.commit_record(manifest, rels, opts)
+  opts = opts or {}
+  if opts.record == false then
+    -- Dependency pulled into an isolated store: the files landed, but only
+    -- the owning package is registered (the store is removed as a unit).
+    return
+  end
+  manifest.source = opts.source or "remote"
+  db.record(manifest.name, manifest, rels, {
+    kind = opts.kind,
+    isolated = opts.isolate_root ~= nil,
+    reserve_root = opts.isolate_root,
+  })
+end
 
-    if opts.record == false then
-      -- Dependency pulled into an isolated store: the files landed, but only
-      -- the owning package is registered (the store is removed as a unit).
-      return
-    end
-
-    manifest.source = opts.source or "remote"
-    db.record(name, manifest, owned_rels(owned), {
-      kind = opts.kind,
-      isolated = opts.isolate_root ~= nil,
-      reserve_root = opts.isolate_root,
-    })
-    -- Mirror this entry's deps into each dependency's dependents list so
-    -- -Remove knows what still requires it (covers deps installed earlier in
-    -- this run AND deps that were already present). Isolated stores skip this:
-    -- they are self-contained and removed wholesale.
-    if opts.isolate_root == nil then
-      for _, d in ipairs(manifest.deps or {}) do
-        if db.is_installed(d.name) then db.add_dependent(d.name, name) end
+-- commit_wire(items) -- mirror each entry's deps into the dependents lists so
+-- -Remove knows what still requires it (covers deps installed earlier in this
+-- run AND deps that were already present). Isolated stores skip this: they are
+-- self-contained and removed wholesale. Runs once, in plan order, after every
+-- package is recorded: the pool completes packages out of order, and a
+-- dependent must never be wired before its dependency is registered.
+function builder.commit_wire(items)
+  for _, it in ipairs(items) do
+    if it.record ~= false and it.isolate_root == nil then
+      for _, d in ipairs(it.manifest.deps or {}) do
+        if db.is_installed(d.name) then db.add_dependent(d.name, it.manifest.name) end
       end
     end
-  end)
-
-  if not ok then
-    error(("install of %s failed: %s"):format(name, tostring(err)), 0)
   end
+end
 
-  log.ok(("provided %s-%s"):format(name, manifest.version))
+-- ---------------------------------------------------------------------------
+-- Commit pool
+-- ---------------------------------------------------------------------------
+
+-- The Lua interpreter running us (arg[-1], the pattern the test harness uses).
+local LUA_BIN = (arg and arg[-1]) or "lua"
+
+-- This module's directory, so the worker script sits next to us no matter
+-- where Zeta is installed.
+local function worker_script()
+  local src = debug.getinfo(1, "S").source
+  if src:sub(1, 1) == "@" then src = src:sub(2) end
+  local dir = src:match("^(.*)[/\\][^/\\]*$") or "."
+  return path.join(dir, "commitworker.lua")
+end
+
+-- A worker ticket is a Lua file the worker dofile()s.
+local function write_ticket(file, t)
+  local f = io.open(file, "w")
+  if not f then return nil, ("could not write worker ticket %s"):format(file) end
+  f:write("return {\n")
+  f:write(("  name = %q,\n"):format(t.name))
+  f:write(("  version = %q,\n"):format(t.version))
+  f:write(("  staging = %q,\n"):format(t.staging))
+  f:write(("  report = %q,\n"):format(t.report))
+  f:write(("  status = %q,\n"):format(t.status))
+  f:write(("  progress = %q,\n"):format(t.progress))
+  if t.root then f:write(("  root = %q,\n"):format(t.root)) end
+  if t.force then f:write("  force = true,\n") end
+  if t.whitelist then
+    f:write("  whitelist = {\n")
+    for _, w in ipairs(t.whitelist) do f:write(("    %q,\n"):format(w)) end
+    f:write("  },\n")
+  end
+  f:write("}\n")
+  f:close()
   return true
 end
 
--- install(manifest, opts) -- the one-package pipeline: stage_one + commit_one.
--- Batch flows (actions._install / actions.transcend) drive the phases
--- themselves so every payload is verified and staged before the first file
--- is committed; this wrapper is for single-package callers.
+-- Worker results are line files: the report lists owned entries as
+-- "<type>|<rel>", the status file carries the exit code on its first line
+-- and an error message below.
+local function read_lines(file)
+  local f = io.open(file, "rb")
+  if not f then return nil end
+  local out = {}
+  for line in f:lines() do out[#out + 1] = line end
+  f:close()
+  return out
+end
+
+-- Split a worker report into the owned paths (for the database) and the
+-- per-type counts (for the aggregate summary).
+local function parse_report(lines)
+  local rels, c = {}, { files = 0, symlinks = 0, dirs = 0 }
+  for _, l in ipairs(lines or {}) do
+    local tag, rel = l:match("^([fld])%|(.*)$")
+    if tag then
+      rels[#rels + 1] = rel
+      if tag == "f" then c.files = c.files + 1
+      elseif tag == "l" then c.symlinks = c.symlinks + 1
+      else c.dirs = c.dirs + 1 end
+    end
+  end
+  return rels, c
+end
+
+-- Launch one commit worker in the background. The shell leaves a status file
+-- behind even when the worker process dies before writing one.
+local function spawn_worker(item, opts, slot, dir)
+  local m = item.manifest
+  local base = path.join(dir, "commit-" .. slot .. "-" .. m.name)
+  local w = {
+    item = item,
+    out = base .. ".out",
+    ticket = base .. ".lua",
+    report = base .. ".report",
+    status = base .. ".status",
+    progress = base .. ".progress",
+    pid_file = base .. ".pid",
+    done = 0,
+  }
+  local ok, terr = write_ticket(w.ticket, {
+    name = m.name,
+    version = m.version,
+    staging = item.staged.stage,
+    root = item.isolate_root,
+    force = opts.force,
+    whitelist = m.files,
+    report = w.report,
+    status = w.status,
+    progress = w.progress,
+  })
+  if not ok then return nil, terr end
+  local cmd = ("{ %s %s %s > %s 2>&1; [ -f %s ] || echo 1 > %s; } & echo $! > %s"):format(
+    path.quote(LUA_BIN), path.quote(worker_script()), path.quote(w.ticket),
+    path.quote(w.out), path.quote(w.status), path.quote(w.status),
+    path.quote(w.pid_file))
+  os.execute(cmd)
+  return w
+end
+
+-- commit_all(items, opts) -> true | nil, errmsg
+--
+-- Commit every staged package as ONE transaction: a single "committing files
+-- to <root>" header and one live counter summed across every package's
+-- entries. Up to opts.jobs provides run at a time and the next starts as soon
+-- as a slot frees. The database writes and the dependents wiring stay in this
+-- process (single-threaded, so no two workers can race on the registries),
+-- and the system-wide side effects (ldconfig, GSettings schema compilation)
+-- run once at the very end.
+--
+-- When the counter settles: one aggregate file/symlink/dir summary, then the
+-- list of what was provided (plan order; a package with announce = false is
+-- left out because the closing block announces it).
+--
+-- items: { { manifest, staged, kind, source, isolate_root, record, announce } }
+--        `staged` is the handle from stage_one; it is discarded here.
+-- opts:  { jobs, force }
+function builder.commit_all(items, opts)
+  opts = opts or {}
+  local cfg = config.get()
+  local jobs = tonumber(opts.jobs) or cfg.jobs or 2
+  if jobs < 1 then jobs = 1 end
+
+  local dir = path.join(cfg.tmp_dir, "commit-"
+    .. tostring(os.time()) .. "-" .. tostring(math.random(1000, 9999)))
+  path.mkdir_p(dir)
+
+  -- The counter's denominator is known before the first file moves.
+  local dest_root = cfg.root
+  for _, it in ipairs(items) do
+    if it.isolate_root then dest_root = it.isolate_root end
+  end
+  local total_entries = 0
+  local pok, perr = pcall(function()
+    for _, it in ipairs(items) do
+      total_entries = total_entries + commit.count_owned(it.staged.stage, it.manifest.files)
+    end
+  end)
+  if not pok then
+    path.run("rm -rf " .. path.quote(dir))
+    return nil, tostring(perr)
+  end
+
+  log.step(("committing files to %s"):format(dest_root))
+
+  local show_counter = spinner.enabled() and not cfg.verbose
+  local settled, live = 0, 0
+  local counts = { files = 0, symlinks = 0, dirs = 0 }
+  local completed, schemas, failed = {}, false, nil
+
+  local function draw(final)
+    if show_counter then commit.counter(settled + live, total_entries, final) end
+  end
+
+  -- Run a print without breaking the live counter line.
+  local function around(fn)
+    if show_counter then io.write("\r\27[K") end
+    fn()
+    if show_counter then draw(false) end
+  end
+
+  local function message(text)
+    around(function() io.write(text) end)
+  end
+
+  -- One package is fully placed: record it (parent-side, serialized), fold
+  -- its numbers into the aggregate summary, and announce it right away --
+  -- the stream itself shows the completion order.
+  local function finish_item(it, rels, c)
+    settled = settled + #rels
+    counts.files = counts.files + (c and c.files or 0)
+    counts.symlinks = counts.symlinks + (c and c.symlinks or 0)
+    counts.dirs = counts.dirs + (c and c.dirs or 0)
+    for _, r in ipairs(rels) do
+      if r:match("^usr/share/glib%-2%.0/schemas/.+%.gschema%.xml$") then
+        schemas = true
+      end
+    end
+    local rok, rerr = pcall(builder.commit_record, it.manifest, rels, it)
+    if not rok then
+      failed = failed or ("install of %s failed: %s"):format(it.manifest.name, tostring(rerr))
+      return
+    end
+    completed[#completed + 1] = it
+    -- The target (announce = false) is named by the closing block instead.
+    if it.announce ~= false then
+      around(function()
+        log.ok(("provided %s-%s"):format(it.manifest.name, it.manifest.version))
+      end)
+    end
+  end
+
+  if jobs == 1 then
+    -- No pool: place and record in this process, one package at a time.
+    for _, it in ipairs(items) do
+      if failed then break end
+      local m = it.manifest
+      live = 0
+      local iok, owned = pcall(builder.commit_placement, m.name, m.version,
+        it.staged.stage, {
+          root = it.isolate_root,
+          whitelist = m.files,
+          force = opts.force,
+          on_progress = function(done)
+            live = done
+            draw(false)
+          end,
+        })
+      if not iok then
+        failed = failed or ("install of %s failed: %s"):format(m.name, tostring(owned))
+      else
+        local rels, c = {}, { files = 0, symlinks = 0, dirs = 0 }
+        for _, e in ipairs(owned) do
+          rels[#rels + 1] = e.rel
+          if e.type == "symlink" then c.symlinks = c.symlinks + 1
+          elseif e.type == "dir" then c.dirs = c.dirs + 1
+          else c.files = c.files + 1 end
+        end
+        finish_item(it, rels, c)
+        live = 0
+      end
+    end
+  else
+    -- Rolling pool: dispatch up to `jobs` workers, start the next one the
+    -- moment a slot frees. All drawing happens here, from the progress
+    -- stamps the workers leave behind.
+    local running = {}
+    local next_i, slot = 1, 0
+    local hook
+    hook = function()
+      for _, w in ipairs(running) do
+        local pid = read_lines(w.pid_file)
+        if pid and pid[1] then os.execute("kill " .. pid[1] .. " 2>/dev/null") end
+      end
+      path.remove_cleanup(hook)
+    end
+    path.on_cleanup(hook)
+
+    while next_i <= #items or #running > 0 do
+      while not failed and #running < jobs and next_i <= #items do
+        local it = items[next_i]
+        next_i = next_i + 1
+        slot = slot + 1
+        local w, werr = spawn_worker(it, opts, slot, dir)
+        if not w then
+          failed = failed or ("install of %s failed: %s"):format(it.manifest.name, tostring(werr))
+        else
+          running[#running + 1] = w
+        end
+      end
+
+      for k = #running, 1, -1 do
+        local w = running[k]
+        local status = read_lines(w.status)
+        if status then
+          table.remove(running, k)
+          -- Verbose per-file output is the only thing a worker prints;
+          -- replay it under the counter as one piece.
+          local block = read_lines(w.out)
+          if block and #block > 0 then
+            message(table.concat(block, "\n") .. "\n")
+          end
+          if tonumber(status[1] or "") == 0 then
+            local rels, c = parse_report(read_lines(w.report))
+            finish_item(w.item, rels, c)
+          else
+            local msg = table.concat(status, "\n", 2)
+            failed = failed or ("install of %s failed: %s"):format(
+              w.item.manifest.name, (msg ~= "" and msg) or "commit worker failed")
+          end
+        end
+      end
+
+      -- Redraw the aggregate counter from the workers' progress stamps.
+      live = 0
+      for _, w in ipairs(running) do
+        local p = read_lines(w.progress)
+        live = live + (p and tonumber(p[1] or "") or 0)
+      end
+      draw(false)
+
+      if #running > 0 then os.execute("sleep 0.1") end
+    end
+    path.remove_cleanup(hook)
+  end
+
+  -- The transaction is over: settle the counter and summarize what landed.
+  if failed then
+    if show_counter then io.write("\r\27[K") end
+  else
+    draw(true)
+  end
+  if counts.files > 0 then
+    log.info(("- committed %d files to %s"):format(counts.files, dest_root))
+  end
+  if counts.symlinks > 0 then
+    log.info(("- committed %d symlinks to %s"):format(counts.symlinks, dest_root))
+  end
+  if counts.dirs > 0 then
+    log.info(("- committed %d dirs to %s"):format(counts.dirs, dest_root))
+  end
+
+  -- Everything that will ever be on disk is on disk now: wire dependents in
+  -- plan order (every completed package is recorded) and run the deferred
+  -- system-wide operations exactly once.
+  if #completed > 0 then
+    builder.commit_wire(completed)
+    local root, isolated = cfg.root, false
+    for _, it in ipairs(completed) do
+      if it.isolate_root then
+        root, isolated = it.isolate_root, true
+      end
+    end
+    commit.run_system_ops({ root = root, isolated = isolated, schemas = schemas })
+  end
+
+  -- Drop every staging tree, committed or not, along with the worker files.
+  for _, it in ipairs(items) do
+    builder.discard_staged(it.staged)
+  end
+  path.run("rm -rf " .. path.quote(dir))
+
+  if failed then return nil, failed end
+  return true
+end
+
+-- install(manifest, opts) -- the one-package pipeline: stage_one + commit_all
+-- with the pool disabled. Batch flows (actions._install / actions.transcend)
+-- drive the phases themselves so every payload is verified and staged before
+-- the first file is committed; this wrapper is for single-package callers.
 -- opts: { force, source, local_dir, kind, pre_fetched, verified,
---         isolate_root, record }
+--         isolate_root, record, announce }
 -- opts.kind is "package" for an explicit install or "dependency" for an
 -- auto-installed dependency (see actions.lua); it decides which database
 -- registry the entry lands in.
@@ -486,8 +811,15 @@ function builder.install(manifest, opts)
     payload = opts.pre_fetched,
     verified = opts.verified,
   })
-  local ok, err = pcall(builder.commit_one, manifest, staged, opts)
-  builder.discard_staged(staged)
+  local ok, err = builder.commit_all({ {
+    manifest = manifest,
+    staged = staged,
+    kind = opts.kind,
+    source = opts.source,
+    isolate_root = opts.isolate_root,
+    record = opts.record,
+    announce = opts.announce,
+  } }, { force = opts.force, jobs = 1 })
   if not ok then error(tostring(err), 0) end
   return true
 end
