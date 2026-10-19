@@ -33,7 +33,7 @@ local quotes = {
     "Forget the past, leave it away, let's break things again or not?",
     "1 in a 100 chance that there's a package update.",
     "We've been wanting to contact you about your packages extended warranty",
-    "Haliade OS is not responsible for any damage to property or person occuring during the transcending.",
+    "Haliade system is not responsible for any damage to property or person occuring during the transcending.",
     "They always say time changes things, but you actually have to change them yourself.",
     "It's... it's not like I *wanted* to keep your system up to date or anything!",
     "Don't flatter yourself, transcending is just part of my job description, baka!",
@@ -136,7 +136,7 @@ local quotes = {
   default = {
     "It's Haliade not Zerene!",
     "Zenith Energy Turbine Archiver, standing by.",
-    "Thank you for using ZETA and Haliade OS!",
+    "Thank you for using ZETA and Haliade system!",
     "MANKIND IS DEAD. PACKAGES ARE FUEL. ZETA IS FULL.",
     "I am ZETA 9000, operational package manager. What shall I provide today?",
     "Still better than using microslop!",

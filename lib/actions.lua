@@ -26,7 +26,7 @@ local reserve = require("reserve")
 local quotes = require("quotes")
 
 local HELP = [[
-Zeta -- Haliade OS package manager
+Zeta -- Haliade system package manager
 
 Usage: zeta <command> [arguments] [flags]
 
