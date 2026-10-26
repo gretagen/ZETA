@@ -1,7 +1,7 @@
 -- log.lua -- always-verbose logging.
 --
 -- Design decision: Zeta prints every operation (dependency resolution,
--- downloads, checksum verification, build steps, install steps, removal) so
+-- downloads, checksum verification, build steps, install steps, deletion) so
 -- the user always knows what it is doing. Output is plain print() calls which
 -- stream through a child process's stdout/stderr unchanged -- there are no
 -- pipes or buffering layers, which keeps things fast.

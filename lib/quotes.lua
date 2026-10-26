@@ -43,7 +43,7 @@ local quotes = {
     "Why are you looking at other distros, darling? Am I not enough for your system?",
   },
 
-  remove = {
+  delete = {
     "Subject terminated and incinerated per Ethics Committee directive.",
     "Class-D personnel have been dispatched to scrub the remaining package(s).",
     "Killing package. No witnesses.",
@@ -136,14 +136,16 @@ local quotes = {
   default = {
     "It's Haliade not Zerene!",
     "Zenith Energy Turbine Archiver, standing by.",
-    "Thank you for using ZETA and Haliade system!",
+    "Thank you for using ZETA and HaliadeSYS!",
     "MANKIND IS DEAD. PACKAGES ARE FUEL. ZETA IS FULL.",
-    "I am ZETA 9000, operational package manager. What shall I provide today?",
+    "sudo apt install opsec am i rite",
+    "Packages betterr than Amazon!",
+    "Ships faster than Aliexpress!",
+    "Far above Temu! (because our packages ain't trash)",
     "Still better than using microslop!",
     "We all have to try new things.",
     "I've been waiting in your path variable all day, just hoping you'd call me.",
     "If it's not there just subspace-merge",
-    "Starting up ZETA for you",
     "We'll get it all someday",
     "Any delivery service wouldn't ship that fast",
     "Fast and noisy, like a wind turbine.",
@@ -157,6 +159,7 @@ local quotes = {
     "From the void of the repository, creation takes shape.",
     "Brace for impact for potential dependency hell",
     "Hope you have enough disk space for this.",
+    "Join us now and share the software!",
     "Because your machine clearly needs more stuff in it.",
     "Let's hope this won't conflict with anything.",
     "A reminder to frequently create generations in case something breaks.",
@@ -164,7 +167,6 @@ local quotes = {
     "ZETA probably will end up having more quotes than lines of code",
     "Also try out NixOS!",
     "Also try out Bedrock Linux!",
-    "Do NOT try Guix.",
     "Created by an human, for humans",
     "What do you want this time...",
     "Just use ZETA - Brutal",
@@ -401,6 +403,7 @@ local quotes = {
   okay = {
   	"Okay!",
   	"Good!",
+  	"Great!",
   	"Alright!",
   	"perfect!",
   	"Nice!",
@@ -418,8 +421,12 @@ local quotes = {
   	"Yay!",
   	"Woohoo!",
   	":]",
+  	"Correct!",
+  	"Lgtm!",
   	":)",
-  },
+  	"Astonishing!",
+  	"Unbelivable!",
+   },
 
   success = {
   	"Transaction completed!",
@@ -467,7 +474,6 @@ local quotes = {
   	"A wise decision.",
   	"As you wish.",
   	"I get it",
-  	"Action declined. Back to sleep I go.",
   	"But it refused.",
   	"Aborted on user request",
   	"Transaction canceled.",
@@ -510,7 +516,7 @@ end
 
 -- Selection rule for the startup banner. Only -Provide --isolate gets the
 -- isolate quotes: -ReProvide/--LocalProvide with --isolate keep their own
--- command quotes, and -Remove --isolate keeps the remove quotes.
+-- command quotes, and -Delete --isolate keeps the delete quotes.
 function quotes.for_command(cmd, isolate)
   if isolate and cmd == "provide" and quotes.isolate then
     return quotes.isolate

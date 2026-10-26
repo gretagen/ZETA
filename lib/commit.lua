@@ -95,7 +95,7 @@ local function collect_owned(staging, whitelist)
   -- Owned entries are all concrete paths a package ships. Filter out directory
   -- entries that are prefixes of other entries: if a package owns usr/bin/hello,
   -- we don't record usr/ or usr/bin/ -- delete_files collects parents dynamically.
-  -- This prevents removal from ever attempting to rmdir system directories.
+  -- This prevents deletion from ever attempting to rmdir system directories.
   local non_dir = {}
   local dir_set = {}
   for _, e in ipairs(entries) do
@@ -216,7 +216,7 @@ function commit.apply(staging, opts)
         -- `-f`-replace an existing destination whose parent is a symlinked
         -- directory: it reports ENOTDIR from the parent resolution instead of
         -- unlinking (e.g. replacing a plain file with `ctstat -> lnstat` under
-        -- /sbin -> usr/sbin). Remove the old entry explicitly first so ln only
+        -- /sbin -> usr/sbin). Delete the old entry explicitly first so ln only
         -- ever creates a fresh link; harmless with GNU ln too.
         path.run("rm -f " .. path.quote(dest))
         if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(dest)) then

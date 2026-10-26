@@ -218,13 +218,13 @@ function reserve.link_profile(store, files)
   return created
 end
 
--- Remove every profile wrapper that points into `store`. Returns the number
--- of wrappers removed.
+-- Delete every profile wrapper that points into `store`. Returns the number
+-- of wrappers deleted.
 function reserve.unlink_profile(store)
   local bin_dir = path.join(config.get().reserve_dir, "profile/bin")
   local f = path.popen("ls -1 " .. path.quote(bin_dir) .. " 2>/dev/null")
   if not f then return 0 end
-  local removed = 0
+  local deleted = 0
   for line in f:lines() do
     if line ~= "" then
       local wrap = path.join(bin_dir, line)
@@ -234,13 +234,13 @@ function reserve.unlink_profile(store)
         h:close()
         if body:find("exec " .. store, 1, true) or body:find("\"" .. store, 1, true) then
           os.remove(wrap)
-          removed = removed + 1
+          deleted = deleted + 1
         end
       end
     end
   end
   f:close()
-  return removed
+  return deleted
 end
 
 -- FHS system links: /usr/bin/<name> and /usr/sbin/<name> pointing at the
@@ -296,16 +296,16 @@ function reserve.link_system(store, files)
   return result
 end
 
--- Remove system links that belong to `store`. Attribution runs through the
+-- Delete system links that belong to `store`. Attribution runs through the
 -- wrapper: a link in /usr/bin points into profile/bin, and the wrapper body
--- names the store it execs -- so only this store's links are removed and
+-- names the store it execs -- so only this store's links are deleted and
 -- another store's links (or a system binary that reclaimed the name) survive.
 -- Must run BEFORE unlink_profile, while the wrappers still exist.
--- Returns the number of links removed.
+-- Returns the number of links deleted.
 function reserve.unlink_system(store)
   local cfg = config.get()
   local profile_prefix = path.join(cfg.reserve_dir, "profile/bin") .. "/"
-  local removed = 0
+  local deleted = 0
   for _, sys_dir in ipairs({ path.join(cfg.root, "usr/bin"), path.join(cfg.root, "usr/sbin") }) do
     local f = path.popen("ls -1 " .. path.quote(sys_dir) .. " 2>/dev/null")
     if f then
@@ -320,7 +320,7 @@ function reserve.unlink_system(store)
               h:close()
               if body:find("exec " .. store, 1, true) or body:find("\"" .. store, 1, true) then
                 os.remove(link)
-                removed = removed + 1
+                deleted = deleted + 1
               end
             end
           end
@@ -329,13 +329,13 @@ function reserve.unlink_system(store)
       f:close()
     end
   end
-  return removed
+  return deleted
 end
 
 -- Wipe an entire store. Guard: the path must live under reserve_dir, so a
 -- corrupted or malicious reserve_root in the database can never rm -rf
 -- something outside the store.
-function reserve.remove_store(store)
+function reserve.delete_store(store)
   local base = config.get().reserve_dir
   if store == nil or store == "" or store == "/" then return false, "invalid store path" end
   if store:sub(1, #base + 1) ~= base .. "/" then

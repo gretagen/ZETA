@@ -3,7 +3,7 @@
 #
 # Only the operations that need superuser privileges are gated:
 #
-#   -Provide -ReProvide -LocalProvide -Solve -Transcend -Remove -Test -Forget
+#   -Provide -ReProvide -LocalProvide -Solve -Transcend -Delete -Test -Forget
 #
 # Everything else runs as any user -- the read-only commands (-Localize searches
 # the remote index, -List reads the installed database, -Help prints usage) and
@@ -20,6 +20,7 @@
 # still be run directly with any Lua interpreter.
 
 # Resolve the command the way lib/cli.lua would.
+
 cmd=""
 for a in "$@"; do
     case "$a" in
@@ -41,7 +42,7 @@ for a in "$@"; do
 done
 
 case "$cmd" in
-    provide|reprovide|localprovide|solve|transcend|remove|test|forget)
+    provide|reprovide|localprovide|solve|transcend|delete|test|forget)
         # Privileged: mutates the system or its download cache.
         if [ "$EUID" -ne 0 ]; then
             quotes=(
@@ -51,6 +52,7 @@ case "$cmd" in
                 "HELL no."
                 "No."
                 "No can't do"
+                "No thank you."
                 "Are you familiar with the term root access?"
                 "ZETA demands supreme authority."
                 "My apologies $USER, but superuser privileges are required."

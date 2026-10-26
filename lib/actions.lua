@@ -2,9 +2,9 @@
 -- resolution, the builder, and the database. All confirmation prompts honor
 -- the --pass flag (skip Y/N and proceed immediately).
 --
--- Install/remove commands accept one or more package names and operate on
+-- Install/delete commands accept one or more package names and operate on
 -- each one in turn, stopping at the first hard failure. Installed state is
--- split into explicit "packages" and auto-installed "dependencies"; -Remove
+-- split into explicit "packages" and auto-installed "dependencies"; -Delete
 -- warns about dependents and --with-deps cascades into orphaned
 -- dependencies.
 
@@ -39,22 +39,22 @@ Commands:
                           With --isolate, rebuild its whole reserved store
                           instead.
   -Transcend              Update all installed packages to their latest versions
-  -Remove <pkg>...        Remove installed packages (see --with-deps)
+  -Delete <pkg>...        Delete installed packages (see --with-deps)
   -List                   List installed packages and dependencies
   -Localize <query>       Search the remote repository index for <query>
                           (shows the repository each package is served from)
   -Test <pkg>             Verify <pkg> offline WITHOUT installing it
-  -Forget                 Remove all cached packages
+  -Forget                 Delete all cached packages
   -Help                   Show this help
 
 Flags:
   --pass                  Skip the Y/N confirmation prompt and proceed immediately
   --force                 Override reverse-dependency and already-installed safety checks
-                          (removal still asks for confirmation)
-  --with-deps             With -Remove, also remove dependencies that are no longer
-                          required by any installed package (never removes packages
+                          (deletion still asks for confirmation)
+  --with-deps             With -Delete, also delete dependencies that are no longer
+                          required by any installed package (never deletes packages
                           installed explicitly)
-  --detail                Deprecated: -Remove now always lists every file
+  --detail                Deprecated: -Delete now always lists every file
   --silence               Suppress tar extraction file listings
                           (faster on slow terminals)
   --isolate               With -Provide/-ReProvide/-LocalProvide: install into a
@@ -63,7 +63,7 @@ Flags:
                           <root>/zeta/reserve/profile/bin and linked into
                           /usr/bin / /usr/sbin, skipping names already taken).
                           With -Solve: rebuild that store in place.
-                          With -Remove: delete the isolated store instead of
+                          With -Delete: delete the isolated store instead of
                           the system copy.
   --no-quote              Disable random startup quotes
   --jobs=N                How many packages may be provided at the same time
@@ -504,14 +504,14 @@ function actions._install(name, flags, opts)
 			-- body, so the wrappers must still exist when we scan.
 			local nl = reserve.unlink_system(old.reserve_root)
 			if nl > 0 then
-				log.detail(("removed %d system link(s) from a previous install"):format(nl))
+				log.detail(("deleted %d system link(s) from a previous install"):format(nl))
 			end
 			local n = reserve.unlink_profile(old.reserve_root)
 			if n > 0 then
-				log.detail(("removed %d stale profile wrapper(s)"):format(n))
+				log.detail(("deleted %d stale profile wrapper(s)"):format(n))
 			end
 			if old.reserve_root ~= store then
-				local ok, err = reserve.remove_store(old.reserve_root)
+				local ok, err = reserve.delete_store(old.reserve_root)
 				if not ok then log.warn(tostring(err)) end
 			end
 		end
@@ -555,7 +555,7 @@ function actions._install(name, flags, opts)
 			source = source,
 			isolate_root = store,
 			-- Only the target is registered; its deps are store internals
-			-- and disappear with the store on removal.
+			-- and disappear with the store on deletion.
 			record = (not isolate) or item.name == name,
 			-- The target's "provided" line is folded into the closing block.
 			announce = item.name ~= name,
@@ -616,7 +616,7 @@ end
 -- exists as an isolated store: the two registries are separate, and the user
 -- must consciously drop the store before a system copy can replace it.
 local ISOLATED_CONFLICT_MSG = ("this package has already been installed as isolated! "
-  .. "you will have to remove the isolated package first before reproviding it normally, "
+  .. "you will have to delete the isolated package first before reproviding it normally, "
   .. "if you are sure about this, please use --force flag")
 
 function actions.provide(names, flags)
@@ -912,7 +912,7 @@ function actions.test(name, flags)
 	return 0
 end
 
--- System directories that must never be removed. This is a safety net: even
+-- System directories that must never be deleted. This is a safety net: even
 -- if a package's file list contains these paths (due to legacy record-keeping),
 -- delete_files will refuse to unlink or rmdir them.
 
@@ -927,24 +927,24 @@ for _, d in ipairs({
   PROTECTED_DIRS[d] = true
 end
 
--- ANSI colors for the removal progress line (mirrors commit.lua).
+-- ANSI colors for the deletion progress line (mirrors commit.lua).
 local function wants_color()
   local t = os.getenv("TERM")
   if not t or t == "" or t == "dumb" then return false end
   if os.getenv("NO_COLOR") then return false end
   return true
 end
-local REM_COLOR = wants_color()
-local REM_C = {
+local DEL_COLOR = wants_color()
+local DEL_C = {
   reset = "\27[0m",
   blue  = "\27[34m",
   green = "\27[32m",
   cyan  = "\27[36m",
   dim   = "\27[2m",
 }
-local function rem_paint(color, s)
-  if not REM_COLOR then return s end
-  return REM_C[color] .. s .. REM_C.reset
+local function del_paint(color, s)
+  if not DEL_COLOR then return s end
+  return DEL_C[color] .. s .. DEL_C.reset
 end
 
 -- Unlink the owned files of an entry, skipping unsafe paths, protected
@@ -981,7 +981,7 @@ local function delete_files(files, pkg_name, owner_index)
         else
           os.remove(p)
           if verbose then
-            notes[#notes + 1] = ("removed %s"):format(rel)
+            notes[#notes + 1] = ("deleted %s"):format(rel)
           end
           local d = path.dirname(p)
           while d ~= "/" and d ~= "." and not seen[d] do
@@ -997,19 +997,19 @@ local function delete_files(files, pkg_name, owner_index)
 
     done = done + 1
     if show_progress then
-      io.write(("\r\27[K  [ removed %s | %s files ] %s"):format(
-        rem_paint("blue", tostring(done)),
-        rem_paint("cyan", tostring(total)),
-        rem_paint("dim", rel)))
+      io.write(("\r\27[K  [ deleted %s | %s files ] %s"):format(
+        del_paint("blue", tostring(done)),
+        del_paint("cyan", tostring(total)),
+        del_paint("dim", rel)))
       io.flush()
     end
   end
 
   -- Final green count; replaces the live line.
   if show_progress then
-    io.write(("\r\27[K  [ removed %s | %s files ]\n"):format(
-      rem_paint("green", tostring(total)),
-      rem_paint("cyan", tostring(total))))
+    io.write(("\r\27[K  [ deleted %s | %s files ]\n"):format(
+      del_paint("green", tostring(total)),
+      del_paint("cyan", tostring(total))))
     io.flush()
   end
 
@@ -1038,9 +1038,9 @@ local function remaining_dependents(name, planned)
 end
 
 -- Determine the transitive set of dependency-kind entries that would
--- become orphaned if everything in `planned` were removed.  `seed` gives the
--- starting removal order (the explicit targets, dependents first).  Returns
--- two values: the full removal order (seed then cascaded deps) and a table
+-- become orphaned if everything in `planned` were deleted.  `seed` gives the
+-- starting deletion order (the explicit targets, dependents first).  Returns
+-- two values: the full deletion order (seed then cascaded deps) and a table
 -- of { dep = rd_list } for deps that were skipped because they are still
 -- required by something outside the plan.
 local function resolve_cascade(planned, seed)
@@ -1069,11 +1069,11 @@ local function resolve_cascade(planned, seed)
   return order, skip
 end
 
--- -Remove --isolate: delete isolated stores wholesale. Each isolated package
--- is a self-contained environment, so removing any member (there is only the
--- target registered anyway) removes the whole store: profile wrappers first,
+-- -Delete --isolate: delete isolated stores wholesale. Each isolated package
+-- is a self-contained environment, so deleting any member (there is only the
+-- target registered anyway) deletes the whole store: profile wrappers first,
 -- then the store directory, then the registry entry.
-function actions.remove_isolated(names, flags)
+function actions.delete_isolated(names, flags)
   local targets = {}
   for _, raw in ipairs(names) do
     local name = path.sanitize_name(raw)
@@ -1094,12 +1094,12 @@ function actions.remove_isolated(names, flags)
     local m = db.isolated_meta(n)
     local entry = { name = n, version = m and m.version or "?", store = m and m.reserve_root }
     plan[#plan + 1] = entry
-    print(("  will remove %s-%s (isolated store %s)"):format(entry.name, entry.version, entry.store or "?"))
+    print(("  will delete %s-%s (isolated store %s)"):format(entry.name, entry.version, entry.store or "?"))
   end
   print("")
 
   local noun = #plan == 1 and "1 isolated package" or (#plan .. " isolated packages")
-  if not confirm(("Remove %s?"):format(noun), flags.pass, " [y/N]", true) then
+  if not confirm(("Delete %s?"):format(noun), flags.pass, " [y/N]", true) then
     log.abort("aborted by user")
     return 0
   end
@@ -1109,27 +1109,27 @@ function actions.remove_isolated(names, flags)
       -- System links before wrappers: link attribution reads the wrapper body.
       local nl = reserve.unlink_system(e.store)
       if nl > 0 then
-        log.detail(("removed %d system link(s)"):format(nl))
+        log.detail(("deleted %d system link(s)"):format(nl))
       end
       local n = reserve.unlink_profile(e.store)
       if n > 0 then
-        log.detail(("removed %d profile wrapper(s)"):format(n))
+        log.detail(("deleted %d profile wrapper(s)"):format(n))
       end
-      local ok, err = reserve.remove_store(e.store)
+      local ok, err = reserve.delete_store(e.store)
       if not ok then
         log.error(tostring(err))
         return 1
       end
     end
-    db.remove_isolated(e.name)
-    log.ok(("removed %s"):format(e.name))
+    db.delete_isolated(e.name)
+    log.ok(("deleted %s"):format(e.name))
   end
   return 0
 end
 
-function actions.remove(names, flags)
+function actions.delete(names, flags)
   if flags.isolate then
-    return actions.remove_isolated(names, flags)
+    return actions.delete_isolated(names, flags)
   end
   -- 1) Sanitize and validate all names up-front.
   local targets = {}
@@ -1144,7 +1144,7 @@ function actions.remove(names, flags)
   for _, n in ipairs(targets) do
     if not db.kind(n) then
       if db.isolated(n) then
-        log.error(("%s is provided as isolated -- use -Remove --isolate."):format(n))
+        log.error(("%s is provided as isolated -- use -Delete --isolate."):format(n))
       else
         log.error(("%s has not been provided."):format(n))
       end
@@ -1163,7 +1163,7 @@ function actions.remove(names, flags)
     for _, n in ipairs(targets) do
       local rd = remaining_dependents(n, planned)
       if #rd > 0 then
-        log.error(("Unable to remove %s as it is still required by %s, if you are sure about this, use --force flag"):format(
+        log.error(("Unable to delete %s as it is still required by %s, if you are sure about this, use --force flag"):format(
           n, table.concat(rd, ", ")))
         return 1
       end
@@ -1171,30 +1171,30 @@ function actions.remove(names, flags)
   end
 
   -- 4) Cascade into orphaned dependencies if --with-deps.
-  local removal_order = targets
+  local delete_order = targets
   local skipped = {}
   if flags.with_deps then
-    removal_order, skipped = resolve_cascade(planned, targets)
+    delete_order, skipped = resolve_cascade(planned, targets)
   end
 
-  -- 5) Build the full removal plan. One ownership index for the whole
+  -- 5) Build the full deletion plan. One ownership index for the whole
   -- transaction: every shared-file check becomes a hash lookup instead of a
-  -- full database rescan per file (which dominated removal time on large
+  -- full database rescan per file (which dominated deletion time on large
   -- packages).
   local owner_index = db.file_owner_index()
   local root = config.get().root
 
   local plan = {}
-  for _, n in ipairs(removal_order) do
+  for _, n in ipairs(delete_order) do
     local m = db.get(n)
     local files = db.files(n)
-    local will_remove, will_keep = {}, {}
+    local will_delete, will_keep = {}, {}
     for _, rel in ipairs(files) do
       local others = db.other_owners(n, rel, owner_index)
       if #others > 0 then
         will_keep[#will_keep + 1] = { rel = rel, others = others }
       else
-        will_remove[#will_remove + 1] = rel
+        will_delete[#will_delete + 1] = rel
       end
     end
     plan[#plan + 1] = {
@@ -1202,7 +1202,7 @@ function actions.remove(names, flags)
       version = m and m.version or "?",
       kind = db.kind(n),
       files = files,
-      will_remove = will_remove,
+      will_delete = will_delete,
       will_keep = will_keep,
       shared = #will_keep,
       dependents = remaining_dependents(n, planned),
@@ -1215,21 +1215,21 @@ function actions.remove(names, flags)
 
   -- 6) Print the plan: a package header plus every file that will actually
   -- change (mirrors "will provide" lines). Shared files are listed as keep --
-  -- they survive the removal. The whole listing is built as one string and
+  -- they survive the deletion. The whole listing is built as one string and
   -- printed in a single write: thousands of print() calls would drag on slow
   -- terminals, the same reason install output is batched.
   local listing = {}
   for _, e in ipairs(plan) do
-    listing[#listing + 1] = ("  will remove %s-%s"):format(e.name, e.version)
-    for _, rel in ipairs(e.will_remove) do
-      listing[#listing + 1] = ("      will remove %s"):format(path.join(root, rel))
+    listing[#listing + 1] = ("  will delete %s-%s"):format(e.name, e.version)
+    for _, rel in ipairs(e.will_delete) do
+      listing[#listing + 1] = ("      will delete %s"):format(path.join(root, rel))
     end
     for _, k in ipairs(e.will_keep) do
       listing[#listing + 1] = ("      keep %s (also owned by %s)"):format(
         path.join(root, k.rel), table.concat(k.others, ", "))
     end
     if #e.dependents > 0 then
-      listing[#listing + 1] = ("    !! removing %s breaks: %s"):format(
+      listing[#listing + 1] = ("    !! deleting %s breaks: %s"):format(
         e.name, table.concat(e.dependents, ", "))
     end
   end
@@ -1243,21 +1243,21 @@ function actions.remove(names, flags)
 
   -- 7) Single confirmation, default NO.
   local noun = #plan == 1 and "1 package" or (#plan .. " packages")
-  if not confirm(("Remove %s?"):format(noun), flags.pass, " [y/N]", true) then
+  if not confirm(("Delete %s?"):format(noun), flags.pass, " [y/N]", true) then
     log.abort("aborted by user")
     return 0
   end
 
-  -- 8) Execute removals.
+  -- 8) Execute deletions.
   for _, e in ipairs(plan) do
     local m = db.get(e.name)
-    log.step(("removing %s-%s (%d files)"):format(e.name, e.version, #e.files))
+    log.step(("deleting %s-%s (%d files)"):format(e.name, e.version, #e.files))
     delete_files(e.files, e.name, owner_index)
-    db.remove(e.name)
+    db.delete(e.name)
     for _, d in ipairs(m and m.deps or {}) do
-      db.remove_dependent(d, e.name)
+      db.delete_dependent(d, e.name)
     end
-    log.ok(("removed %s"):format(e.name))
+    log.ok(("deleted %s"):format(e.name))
   end
   return 0
 end
@@ -1455,7 +1455,7 @@ end
 
 function actions.forget(pass)
 	local cfg = config.get()
-	if not confirm("Remove all cached packages?", pass, " [y/N]", true) then
+	if not confirm("Delete all cached packages?", pass, " [y/N]", true) then
 		log.abort("aborted by user")
 		return 0
 	end

@@ -397,7 +397,7 @@ function builder.stage_one(manifest, opts)
   return { stage = stage, work = work }
 end
 
--- discard_staged(staged) -- remove the staging tree produced by stage_one.
+-- discard_staged(staged) -- delete the staging tree produced by stage_one.
 function builder.discard_staged(staged)
   if not staged then return end
   if staged.work then path.run("rm -rf " .. path.quote(staged.work)) end
@@ -430,7 +430,7 @@ function builder.commit_record(manifest, rels, opts)
   opts = opts or {}
   if opts.record == false then
     -- Dependency pulled into an isolated store: the files landed, but only
-    -- the owning package is registered (the store is removed as a unit).
+    -- the owning package is registered (the store is deleted as a unit).
     return
   end
   manifest.source = opts.source or "remote"
@@ -442,9 +442,9 @@ function builder.commit_record(manifest, rels, opts)
 end
 
 -- commit_wire(items) -- mirror each entry's deps into the dependents lists so
--- -Remove knows what still requires it (covers deps installed earlier in this
+-- -Delete knows what still requires it (covers deps installed earlier in this
 -- run AND deps that were already present). Isolated stores skip this: they are
--- self-contained and removed wholesale. Runs once, in plan order, after every
+-- self-contained and deleted wholesale. Runs once, in plan order, after every
 -- package is recorded: the pool completes packages out of order, and a
 -- dependent must never be wired before its dependency is registered.
 function builder.commit_wire(items)
@@ -802,7 +802,7 @@ end
 -- an isolated package). When set, files commit into that root instead of
 -- config.root, and the host linker cache is left alone.
 -- opts.record (default true) controls the database write: dependency installs
--- into an isolated store are not registered (the whole store is removed as a
+-- into an isolated store are not registered (the whole store is deleted as a
 -- unit when the owning package is uninstalled).
 function builder.install(manifest, opts)
   opts = opts or {}

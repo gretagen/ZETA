@@ -4,7 +4,7 @@
 --   3. Built-in defaults (lowest priority)
 --
 -- ZETA_ROOT is how Zeta stays "rooted" and testable: point it at a scratch
--- directory and every install, database write, and removal happens under it.
+-- directory and every install, database write, and deletion happens under it.
 --
 -- The client can consult several remote repositories at once. `repos` is the
 -- resolved consultation list (first hit wins) and comes from, in order:

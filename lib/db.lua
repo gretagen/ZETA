@@ -13,13 +13,13 @@
 --   files     -- one owned relative path per line
 --
 -- A dependency's meta.lua also carries `dependents`, the list of installed
--- entries that depend on it. That back-reference is what lets -Remove decide
+-- entries that depend on it. That back-reference is what lets -Delete decide
 -- whether an entry is still required and lets --with-deps cascade safely.
 --
 -- Legacy databases (entries directly under <state_dir>/<name>) are migrated
 -- lazily, once per state dir, into the packages/ registry.
 --
--- The "files" list is the authoritative set of what -Remove may touch: removal
+-- The "files" list is the authoritative set of what -Delete may touch: deletion
 -- unlinks exactly those paths and then prunes now-empty parent directories.
 -- Files are plain text / Lua for transparency and easy manual inspection.
 
@@ -247,7 +247,7 @@ end
 
 -- Installed entries that depend on `name`, from the stored `dependents` list.
 -- Each install maintains that list (see db.record); migration wires it for
--- pre-existing entries. Stale references to removed entries are dropped.
+-- pre-existing entries. Stale references to deleted entries are dropped.
 function db.reverse_dependents(name)
   ensure_migrated()
   local m = db.get(name)
@@ -260,7 +260,7 @@ function db.reverse_dependents(name)
 end
 
 -- Return a list of installed packages (excluding `name`) that also list
--- `file` in their files list. Used by -Remove to decide whether a shared
+-- `file` in their files list. Used by -Delete to decide whether a shared
 -- file can safely be deleted.
 -- `index` is an optional prebuilt db.file_owner_index(): passing it turns
 -- the call into an O(1) lookup instead of a full database rescan.
@@ -288,9 +288,9 @@ function db.other_owners(name, file, index)
 end
 
 -- One-pass ownership map: rel path -> { pkg = true, ... }.
--- -Remove builds this once per transaction; checking thousands of files then
+-- -Delete builds this once per transaction; checking thousands of files then
 -- costs a single hash lookup each instead of rescanning every package's file
--- list per file (which dominated removal time on large packages).
+-- list per file (which dominated deletion time on large packages).
 function db.file_owner_index()
   ensure_migrated()
   local index = {}
@@ -334,7 +334,7 @@ function db.record(name, meta, files, opts)
     old = db.isolated_meta(name)
   else
     old = db.get(name)
-    -- Re-classification moves the entry between registries; remove the stale
+    -- Re-classification moves the entry between registries; delete the stale
     -- location so a name never exists in both.
     here = kind == "dependency" and db.dependencies_dir() or db.packages_dir()
     local other = kind == "dependency" and db.packages_dir() or db.dependencies_dir()
@@ -393,7 +393,7 @@ function db.add_dependent(dep, pkg)
 end
 
 -- Drop `pkg` from `dep`'s dependents list. No-op when `dep` is not installed.
-function db.remove_dependent(dep, pkg)
+function db.delete_dependent(dep, pkg)
   ensure_migrated()
   if not db.is_installed(dep) then return end
   local m = db.get(dep)
@@ -409,14 +409,14 @@ function db.remove_dependent(dep, pkg)
   end
 end
 
-function db.remove(name)
+function db.delete(name)
   ensure_migrated()
   path.run("rm -rf " .. path.quote(db.pkg_dir(name)))
 end
 
--- Remove an isolated registry entry (the store itself is removed by the
+-- Delete an isolated registry entry (the store itself is deleted by the
 -- caller, which owns the reserve path).
-function db.remove_isolated(name)
+function db.delete_isolated(name)
   path.run("rm -rf " .. path.quote(path.join(db.isolated_dir(), name)))
 end
 
