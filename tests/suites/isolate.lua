@@ -84,8 +84,8 @@ suite:test("db.record isolated entries live in their own registry", function()
   lib.assert_eq(db.kind("hello"), "package", "system copy registered")
   lib.assert_true(db.isolated("hello"), "isolated copy still registered")
 
-  db.remove_isolated("hello")
-  lib.assert_false(db.isolated("hello"), "isolated entry removed")
+  db.delete_isolated("hello")
+  lib.assert_false(db.isolated("hello"), "isolated entry deleted")
   lib.assert_eq(db.kind("hello"), "package", "system copy untouched")
 end)
 
@@ -139,7 +139,7 @@ suite:test("link_profile creates bare-name wrappers for the package's own binari
   end
 end)
 
-suite:test("unlink_profile only removes wrappers of the given store", function()
+suite:test("unlink_profile only deletes wrappers of the given store", function()
   local root = fresh()
   local cfg = config.get()
   local store_a = path.join(cfg.reserve_dir, "a-1.0")
@@ -148,29 +148,29 @@ suite:test("unlink_profile only removes wrappers of the given store", function()
   reserve.link_profile(store_a, { "usr/bin/toola" })
   reserve.link_profile(store_b, { "usr/bin/toolb" })
 
-  local removed = reserve.unlink_profile(store_a)
-  lib.assert_eq(removed, 1, "one wrapper removed")
+  local deleted = reserve.unlink_profile(store_a)
+  lib.assert_eq(deleted, 1, "one wrapper deleted")
   lib.assert_false(path.exists(path.join(cfg.reserve_dir, "profile/bin/toola")), "a's wrapper gone")
   lib.assert_true(path.exists(path.join(cfg.reserve_dir, "profile/bin/toolb")), "b's wrapper kept")
 end)
 
-suite:test("remove_store refuses paths outside the reserve dir", function()
+suite:test("delete_store refuses paths outside the reserve dir", function()
   local root = fresh()
   local cfg = config.get()
 
-  local ok, err = reserve.remove_store("/etc")
+  local ok, err = reserve.delete_store("/etc")
   lib.assert_false(ok, "must refuse /etc")
   lib.assert_contains(tostring(err), "outside", "error explains the refusal")
 
-  local ok2, err2 = reserve.remove_store(nil)
+  local ok2, err2 = reserve.delete_store(nil)
   lib.assert_false(ok2, "must refuse nil")
 
   local store = path.join(cfg.reserve_dir, "x-1.0")
   os.execute("mkdir -p " .. path.quote(store .. "/usr"))
   lib.write(path.join(store, "usr/file"), "x")
-  local ok3 = reserve.remove_store(store)
-  lib.assert_true(ok3, "store under reserve dir is removable")
-  lib.assert_false(path.exists(store), "store removed")
+  local ok3 = reserve.delete_store(store)
+  lib.assert_true(ok3, "store under reserve dir is deletable")
+  lib.assert_false(path.exists(store), "store deleted")
 end)
 
 suite:test("link_system mirrors bins into usr/bin and usr/sbin", function()
@@ -226,7 +226,7 @@ suite:test("link_system replaces another store's reserve link", function()
     store_b, "wrapper now belongs to store b")
 end)
 
-suite:test("unlink_system removes only the given store's links", function()
+suite:test("unlink_system deletes only the given store's links", function()
   local root = fresh()
   local cfg = config.get()
   local store_a = path.join(cfg.reserve_dir, "a-1.0")
@@ -239,9 +239,9 @@ suite:test("unlink_system removes only the given store's links", function()
   reserve.link_profile(store_b, { "usr/bin/other" })
   reserve.link_system(store_b, { "usr/bin/other" })
 
-  local removed = reserve.unlink_system(store_a)
+  local deleted = reserve.unlink_system(store_a)
 
-  lib.assert_eq(removed, 1, "only a's link removed")
+  lib.assert_eq(deleted, 1, "only a's link deleted")
   lib.assert_nil(path.readlink(path.join(root, "usr/bin/tool")), "a's link gone")
   lib.assert_eq(path.readlink(path.join(root, "usr/bin/other")),
     path.join(cfg.reserve_dir, "profile/bin/other"), "b's link kept")
@@ -359,12 +359,12 @@ suite:test("bare wrappers are still recognized by unlink_profile/unlink_system",
   reserve.link_profile(store, { "usr/bin/tool" })
   reserve.link_system(store, { "usr/bin/tool" })
 
-  local removed_links = reserve.unlink_system(store)
-  lib.assert_eq(removed_links, 1, "system link removed via bare wrapper")
+  local deleted_links = reserve.unlink_system(store)
+  lib.assert_eq(deleted_links, 1, "system link deleted via bare wrapper")
   lib.assert_nil(path.readlink(path.join(root, "usr/bin/tool")), "system link gone")
 
-  local removed_wraps = reserve.unlink_profile(store)
-  lib.assert_eq(removed_wraps, 1, "bare wrapper removed")
+  local deleted_wraps = reserve.unlink_profile(store)
+  lib.assert_eq(deleted_wraps, 1, "bare wrapper deleted")
   lib.assert_false(path.exists(path.join(cfg.reserve_dir, "profile/bin/tool")),
     "wrapper file gone")
 end)

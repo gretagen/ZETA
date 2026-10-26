@@ -7,7 +7,8 @@ local path = require("path")
 local suite = lib.new_suite("checksum")
 
 local PAYLOAD = path.join(lib.root, "packages", "hello", "hello-1.0.tar.gz")
-local GOOD = "731887527d1a72c57d1e64bad85cc341a4285354e773b2cd277420b744df2943"
+-- Local fixture GOOD digest (regenerated fixture, gitignored /packages/).
+local GOOD = "14086da83aa3001be9bf61076502ce8230efcad67dce1c2cf35a29c4154e47fc"
 
 suite:test("native tool verifies a real payload", function()
   local ok, got = checksum.verify(PAYLOAD, GOOD)

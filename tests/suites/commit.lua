@@ -147,7 +147,7 @@ suite:test("symlinks overwrite an existing file behind a usr-merge symlink", fun
   lib.assert_true(lib.exists(path.join(root, "usr/sbin/lnstat")))
   -- Regexp tied to: uutils-coreutils ln 0.13 cannot -f-replace an existing
   -- destination under a symlinked parent (ENOTDIR instead of unlinking), so
-  -- commit removes the old entry before linking.
+  -- commit deletes the old entry before linking.
 end)
 
 suite:test("library symlinks commit after their target files", function()

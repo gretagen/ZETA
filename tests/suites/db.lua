@@ -1,6 +1,6 @@
 -- db.lua suite -- the installed-package database: metadata round-trip, file
 -- lists, the packages/dependencies registries, dependents back-references,
--- legacy migration, and removal.
+-- legacy migration, and deletion.
 
 local lib = require("lib")
 local db = require("db")
@@ -113,26 +113,26 @@ suite:test("add_dependent is a no-op for an uninstalled dependency", function()
   lib.assert_eq(db.reverse_dependents("ghost"), {})
 end)
 
-suite:test("remove_dependent drops a dependent and leaves the rest", function()
+suite:test("delete_dependent drops a dependent and leaves the rest", function()
   fresh()
   db.record("hello", meta("hello", { deps = {} }), { "usr/bin/hello" }, { kind = "dependency" })
   db.record("app", meta("app", { deps = {} }), { "usr/bin/app" })
   db.record("other", meta("other", { deps = {} }), { "usr/bin/other" })
   db.add_dependent("hello", "app")
   db.add_dependent("hello", "other")
-  db.remove_dependent("hello", "app")
+  db.delete_dependent("hello", "app")
   lib.assert_eq(db.reverse_dependents("hello"), { "other" })
-  db.remove_dependent("ghost", "app") -- no-op
+  db.delete_dependent("ghost", "app") -- no-op
 end)
 
-suite:test("reverse_dependents skips stale references to removed entries", function()
+suite:test("reverse_dependents skips stale references to deleted entries", function()
   fresh()
   db.record("hello", meta("hello", { deps = {} }), { "usr/bin/hello" }, { kind = "dependency" })
   db.record("app", meta("app", { deps = {} }), { "usr/bin/app" })
   db.record("gone", meta("gone", { deps = {} }), { "usr/bin/gone" })
   db.add_dependent("hello", "app")
   db.add_dependent("hello", "gone")
-  db.remove("gone")
+  db.delete("gone")
   lib.assert_eq(db.reverse_dependents("hello"), { "app" })
 end)
 
@@ -168,11 +168,11 @@ suite:test("legacy database is migrated into packages/ with dependents wired", f
   lib.assert_false(lib.exists(path.join(sd, "libz")))
 end)
 
-suite:test("remove deletes the package directory and metadata", function()
+suite:test("delete deletes the package directory and metadata", function()
   local root = fresh()
   db.record("gone", meta("gone"), { "usr/bin/gone" })
   lib.assert_true(db.is_installed("gone"))
-  db.remove("gone")
+  db.delete("gone")
   lib.assert_false(db.is_installed("gone"))
   lib.assert_eq(db.list(), {})
   lib.assert_false(lib.exists(path.join(root, "var/db/zeta/packages", "gone")))
@@ -200,17 +200,17 @@ suite:test("file_owner_index maps files to their owners", function()
     db.other_owners("a", "usr/lib/shared.so"), "index path matches scan path")
 end)
 
-suite:test("file_owner_index is a snapshot that must be rebuilt after removals", function()
+suite:test("file_owner_index is a snapshot that must be rebuilt after deletions", function()
   fresh()
   db.record("a", meta("a"), { "usr/lib/shared.so" })
   db.record("b", meta("b"), { "usr/lib/shared.so" })
   local index = db.file_owner_index()
   lib.assert_eq(db.other_owners("a", "usr/lib/shared.so", index), { "b" })
 
-  db.remove("b")
+  db.delete("b")
   local rebuilt = db.file_owner_index()
   lib.assert_eq(db.other_owners("a", "usr/lib/shared.so", rebuilt), {},
-    "rebuilt index drops the removed owner")
+    "rebuilt index drops the deleted owner")
   lib.assert_eq(db.other_owners("a", "usr/lib/shared.so", index), { "b" },
     "old index is an immutable snapshot")
 end)

@@ -5,7 +5,7 @@ local quotes = require("quotes")
 local suite = lib.new_suite("quotes")
 
 local GROUPS = {
-  "transcend", "remove", "forget", "list", "default", "localize",
+  "transcend", "delete", "forget", "list", "default", "localize",
   "help", "reprovide", "slowdownload", "isolate", "solve",
 }
 
@@ -36,7 +36,7 @@ suite:test("for_command: isolate quotes only for -Provide --isolate", function()
   lib.assert_eq(quotes.for_command("reprovide", true), quotes.reprovide)
   -- no dedicated localprovide group: falls back to default
   lib.assert_eq(quotes.for_command("localprovide", true), quotes.default)
-  lib.assert_eq(quotes.for_command("remove", true), quotes.remove)
+  lib.assert_eq(quotes.for_command("delete", true), quotes.delete)
   lib.assert_eq(quotes.for_command("transcend", true), quotes.transcend)
   lib.assert_eq(quotes.for_command("provide", false), quotes.default)
   lib.assert_eq(quotes.for_command("list", false), quotes.list)

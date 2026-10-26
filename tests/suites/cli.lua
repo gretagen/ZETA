@@ -17,7 +17,7 @@ local function bad(args)
 end
 
 suite:test("every documented command parses", function()
-  for _, c in ipairs({ "-Provide", "-ReProvide", "-LocalProvide", "-Solve", "-Remove", "-Localize", "-Test" }) do
+  for _, c in ipairs({ "-Provide", "-ReProvide", "-LocalProvide", "-Solve", "-Delete", "-Localize", "-Test" }) do
     local p = parse({ c, "pkg" })
     lib.assert_eq(p.args[1], "pkg")
   end
@@ -49,7 +49,7 @@ suite:test("flags can appear before the command", function()
 end)
 
 suite:test("missing argument is rejected", function()
-  bad({ "-Remove" })
+  bad({ "-Delete" })
   bad({ "-Provide" })
   bad({ "-ReProvide" })
   bad({ "-LocalProvide" })
@@ -64,8 +64,8 @@ suite:test("too many arguments is rejected for single-argument commands", functi
   bad({ "-Test", "a", "b" })
 end)
 
-suite:test("install and remove commands accept multiple names", function()
-  lib.assert_eq(parse({ "-Remove", "a", "b" }).args, { "a", "b" })
+suite:test("install and delete commands accept multiple names", function()
+  lib.assert_eq(parse({ "-Delete", "a", "b" }).args, { "a", "b" })
   lib.assert_eq(parse({ "-Provide", "a", "b", "c" }).args, { "a", "b", "c" })
   lib.assert_eq(parse({ "-ReProvide", "x", "y" }).args, { "x", "y" })
   lib.assert_eq(parse({ "-LocalProvide", "m", "n" }).args, { "m", "n" })
@@ -80,16 +80,16 @@ suite:test("-Solve is a command and pairs with --isolate", function()
 end)
 
 suite:test("--with-deps is recorded", function()
-  local p = parse({ "-Remove", "app", "--with-deps" })
+  local p = parse({ "-Delete", "app", "--with-deps" })
   lib.assert_true(p.flags.with_deps)
-  lib.assert_eq(p.command, "remove")
+  lib.assert_eq(p.command, "delete")
 end)
 
 suite:test("--detail is recorded", function()
-  local p = parse({ "-Remove", "app", "--detail" })
+  local p = parse({ "-Delete", "app", "--detail" })
   lib.assert_true(p.flags.detail)
-  lib.assert_eq(p.command, "remove")
-  lib.assert_false(parse({ "-Remove", "app" }).flags.detail)
+  lib.assert_eq(p.command, "delete")
+  lib.assert_false(parse({ "-Delete", "app" }).flags.detail)
 end)
 
 suite:test("--silence is recorded", function()
