@@ -6,7 +6,9 @@
 -- whitelist, report, status, progress }. The worker runs the file-placement
 -- half of commit.apply and writes its results where the parent picks them up:
 --
---   progress   the running entry count, restamped after every commit
+--   progress   the running entry count plus the root-relative path that just
+--              landed (line 1 = count, line 2 = path), restamped after every
+--              commit
 --   report     one "<type>|<rel>" line per owned entry (only on success)
 --   status     exit code on the first line, error message below (always)
 --
@@ -58,10 +60,12 @@ local ok, err = pcall(function()
     pkg_name = t.name,
     root = t.root,
     defer_system = true,
-    on_progress = function(done)
+    on_progress = function(done, total, rel)
+      -- Two lines: the count the parent sums, and the path it draws on the
+      -- progress row. Line 1 stays the count so the existing sum is unaffected.
       local f = io.open(t.progress, "w")
       if f then
-        f:write(tostring(done))
+        f:write(tostring(done), "\n", tostring(rel or ""), "\n")
         f:close()
       end
     end,

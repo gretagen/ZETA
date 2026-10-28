@@ -605,12 +605,16 @@ function builder.commit_all(items, opts)
   log.step(("committing files to %s"):format(dest_root))
 
   local show_counter = spinner.enabled() and not cfg.verbose
-  local settled, live = 0, 0
+  local settled, live, live_rel = 0, 0, nil
   local counts = { files = 0, symlinks = 0, dirs = 0 }
   local completed, schemas, failed = {}, false, nil
 
   local function draw(final)
-    if show_counter then commit.counter(settled + live, total_entries, final) end
+    if show_counter then
+      -- Absolute, so the row reads the same way -Delete's paths do.
+      local rel = live_rel and path.join(dest_root, live_rel)
+      commit.counter(settled + live, total_entries, final, rel)
+    end
   end
 
   -- Run a print without breaking the live counter line.
@@ -656,14 +660,15 @@ function builder.commit_all(items, opts)
     for _, it in ipairs(items) do
       if failed then break end
       local m = it.manifest
-      live = 0
+      live, live_rel = 0, nil
       local iok, owned = pcall(builder.commit_placement, m.name, m.version,
         it.staged.stage, {
           root = it.isolate_root,
           whitelist = m.files,
           force = opts.force,
-          on_progress = function(done)
+          on_progress = function(done, total, rel)
             live = done
+            live_rel = rel
             draw(false)
           end,
         })
@@ -678,7 +683,7 @@ function builder.commit_all(items, opts)
           else c.files = c.files + 1 end
         end
         finish_item(it, rels, c)
-        live = 0
+        live, live_rel = 0, nil
       end
     end
   else
@@ -732,11 +737,15 @@ function builder.commit_all(items, opts)
         end
       end
 
-      -- Redraw the aggregate counter from the workers' progress stamps.
-      live = 0
+      -- Redraw the aggregate counter from the workers' progress stamps. Each
+      -- stamp carries its current entry on line 2, so the row can show what is
+      -- actually landing while the totals tick up. Reset first: once every
+      -- worker has finished there is no live path to show.
+      live, live_rel = 0, nil
       for _, w in ipairs(running) do
         local p = read_lines(w.progress)
         live = live + (p and tonumber(p[1] or "") or 0)
+        if p and p[2] and p[2] ~= "" then live_rel = p[2] end
       end
       draw(false)
 

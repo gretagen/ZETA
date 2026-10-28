@@ -147,16 +147,31 @@ function commit.count_owned(staging, whitelist)
   return #collect_owned(staging, whitelist)
 end
 
--- counter(done, total, final) -- the "[ provided X | T entries ]" line the
--- batch commit redraws across the whole transaction: written in place, and
--- settled with a newline when final.
-function commit.counter(done, total, final)
+-- One braille frame per redraw. The batch counter is redrawn on a 0.1s tick
+-- by builder's rolling pool (and once per entry otherwise), so advancing the
+-- index here is what makes the glyph animate -- no background process of its
+-- own. Frame sequence adapted from bash_loading_animations (MIT, Silejonu).
+local BRAILLE = spinner.BRAILLE
+local braille_i = 0
+local function next_frame()
+  braille_i = braille_i % #BRAILLE + 1
+  return BRAILLE[braille_i]
+end
+
+-- counter(done, total, final, rel) -- the live progress line the batch commit
+-- redraws across the whole transaction: glyph, count, then the entry that was
+-- just placed. Written in place, and settled with a newline when final -- the
+-- path is a live detail, so it drops off the settled summary line. The braille
+-- glyph leads so the row shows something is still moving between entries.
+function commit.counter(done, total, final, rel)
   local n = paint(final and "green" or "blue", tostring(done))
   local tot = paint("cyan", tostring(total))
+  local g = next_frame()
+  local where = (not final and rel) and (" " .. paint("dim", rel)) or ""
   if final then
-    io.write(("\r\27[K  [ provided %s | %s entries ]\n"):format(n, tot))
+    io.write(("\r\27[K%s - [ provided %s | %s entries ]%s\n"):format(g, n, tot, where))
   else
-    io.write(("\r\27[K  [ provided %s | %s entries ]"):format(n, tot))
+    io.write(("\r\27[K%s - [ provided %s | %s entries ]%s"):format(g, n, tot, where))
   end
   io.flush()
 end
@@ -167,9 +182,10 @@ end
 --       installs so the host filesystem and linker cache are never touched),
 --       defer_system (skip the linker-cache/schema work here; the caller runs
 --       commit.run_system_ops once at the end of the transaction),
---       on_progress (called as (done, total) after every committed entry;
---       when set, the caller owns all progress output and the per-type
---       summary, and apply prints neither).
+--       on_progress (called as (done, total, rel) after every committed
+--       entry, rel being the root-relative path that just landed; when set,
+--       the caller owns all progress output and the per-type summary, and
+--       apply prints neither).
 function commit.apply(staging, opts)
   opts = opts or {}
   local owned = collect_owned(staging, opts.whitelist)
@@ -240,12 +256,12 @@ function commit.apply(staging, opts)
     -- Progress: the caller's counter (batch mode) or a live TTY line.
     done = done + 1
     if opts.on_progress then
-      opts.on_progress(done, total)
+      opts.on_progress(done, total, e.rel)
     elseif use_tty and not verbose and total > 0 then
       local n = paint("blue", tostring(done))
       local tot = paint("cyan", tostring(total))
-      local p = paint("dim", e.rel)
-      io.write(("\r\27[K  [ provided %s | %s entries ] %s"):format(n, tot, p))
+      local p = paint("dim", path.join(root, e.rel))
+      io.write(("\r\27[K%s - [ provided %s | %s entries ] %s"):format(next_frame(), n, tot, p))
       io.flush()
     end
 
@@ -266,7 +282,7 @@ function commit.apply(staging, opts)
   if not batch and not verbose and total > 0 and use_tty then
     local n = paint("green", tostring(total))
     local tot = paint("cyan", tostring(total))
-    io.write(("\r\27[K  [ provided %s | %s entries ]\n"):format(n, tot))
+    io.write(("\r\27[K  [ provided %s | %s entries ] %s\n"):format(n, tot, next_frame()))
     io.flush()
   end
 

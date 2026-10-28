@@ -334,7 +334,6 @@ function actions._install(name, flags, opts)
 		return fetch_manifest(n)
 	end
 
-	os.execute("sleep 1")
 	spinner.start("Resolving dependencies")
 	local target_manifest
 	local ok, plan

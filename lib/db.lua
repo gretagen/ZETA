@@ -81,15 +81,62 @@ end
 local migrated = {}
 local migrating = {}
 
+-- Marker left in <state_dir>/ after a successful walk so later invocations
+-- skip it entirely. Carries a schema number so a future layout change can
+-- force a re-run by bumping MIGRATION_SCHEMA.
+local MIGRATION_MARKER = ".migrated"
+local MIGRATION_SCHEMA = 1
+
+-- Read an entry's meta straight from a registry we already know holds it.
+-- Deliberately not db.get()/db.kind(): each of those stats twice and forks a
+-- shell on every miss, which is what made a full walk cost ~30s on a
+-- 600-package database.
+local function read_meta_at(dir, name)
+  local chunk = sandbox.loadfile(path.join(dir, name, "meta.lua"))
+  if not chunk then return nil end
+  local ok, m = pcall(chunk)
+  if not ok or type(m) ~= "table" then return nil end
+  return m
+end
+
+-- Persist a meta into a registry we already know holds the entry, for the
+-- same reason as read_meta_at (db.meta_path() would re-run the kind lookup).
+local function write_meta_at(dir, name, m)
+  local final = path.join(dir, name, "meta.lua")
+  local tmp = final .. ".tmp"
+  local f = io.open(tmp, "wb")
+  if not f then return end
+  f:write("return " .. ser(m) .. "\n")
+  f:close()
+  os.rename(tmp, final)
+end
+
+local function finish_migration(sd)
+  migrating[sd] = nil
+  migrated[sd] = true
+end
+
 -- Move legacy entries directly under <state_dir>/ into packages/, then mirror
 -- every installed entry's `deps` into the `dependents` list of its
--- dependencies. Keyed by state dir so tests and alternate roots each migrate
--- exactly once; a re-entrant call during migration is a no-op.
+-- dependencies. Re-entrant calls during a walk are a no-op; once the marker
+-- exists the whole walk is skipped, because builder.commit_wire() keeps
+-- `dependents` current from then on and the marker is only written after a
+-- complete pass.
 local function ensure_migrated()
   local sd = db.dir()
   if migrated[sd] or migrating[sd] then return end
   migrating[sd] = true
 
+  -- io.open, not path.exists: a miss there forks a shell, and this check runs
+  -- on every command that touches the database.
+  local mf = io.open(path.join(sd, MIGRATION_MARKER), "rb")
+  if mf then
+    mf:close()
+    finish_migration(sd)
+    return
+  end
+
+  -- 1) Relocate any legacy entries that sit directly under <state_dir>/.
   local f = path.popen("ls -1 " .. path.quote(sd) .. " 2>/dev/null")
   if f then
     for line in f:lines() do
@@ -104,20 +151,90 @@ local function ensure_migrated()
     f:close()
   end
 
-  for _, n in ipairs(db.list()) do
-    local m = db.get(n)
-    if m and m.deps then
-      -- Stored metas carry deps as plain names; builder feeds manifests
-      -- whose deps are { name=... } tables. Accept both.
-      for _, d in ipairs(m.deps) do
+  -- 2) One in-memory pass over both system registries: read each meta once,
+  --    derive the dependents each entry should list, and persist only the
+  --    entries that actually change. list_packages()/list_dependencies() are
+  --    safe here -- they re-enter ensure_migrated(), which returns instantly
+  --    on the migrating[sd] guard, then list the directory with io.open
+  --    probes only (no forks for entries that are present).
+  local packages_dir, dependencies_dir = db.packages_dir(), db.dependencies_dir()
+  local reg_of, names, meta = {}, {}, {}
+  local function take(reg, list)
+    for _, n in ipairs(list) do
+      if not reg_of[n] then
+        local m = read_meta_at(reg, n)
+        if m then
+          reg_of[n] = reg
+          meta[n] = m
+          names[#names + 1] = n
+        end
+      end
+    end
+  end
+  take(packages_dir, db.list_packages())
+  take(dependencies_dir, db.list_dependencies())
+  table.sort(names)
+
+  -- Which dependents each entry should list, derived from every entry's deps.
+  local wanted = {}
+  for _, n in ipairs(names) do
+    local deps = meta[n].deps
+    if deps then
+      for _, d in ipairs(deps) do
+        -- Stored metas carry deps as plain names; builder feeds manifests
+        -- whose deps are { name=... } tables. Accept both.
         local dn = type(d) == "table" and d.name or d
-        if dn then db.add_dependent(dn, n) end
+        -- Only installed entries can carry a back-reference.
+        if dn and meta[dn] then
+          local list = wanted[dn]
+          if not list then list = {}; wanted[dn] = list end
+          local seen = false
+          for _, e in ipairs(list) do
+            if e == n then seen = true break end
+          end
+          if not seen then list[#list + 1] = n end
+        end
       end
     end
   end
 
-  migrating[sd] = nil
-  migrated[sd] = true
+  -- Merge rather than replace: an existing list can hold names this walk
+  -- cannot derive, and dropping them would break -Delete's checks.
+  for _, dep in ipairs(names) do
+    local add = wanted[dep]
+    if add then
+      local m = meta[dep]
+      local merged, present = {}, {}
+      for _, e in ipairs(m.dependents or {}) do
+        merged[#merged + 1] = e
+        present[e] = true
+      end
+      local dirty = false
+      for _, n in ipairs(add) do
+        if not present[n] then
+          merged[#merged + 1] = n
+          present[n] = true
+          dirty = true
+        end
+      end
+      if dirty then
+        m.dependents = merged
+        write_meta_at(reg_of[dep], dep, m)
+      end
+    end
+  end
+
+  -- 3) Persist the marker. Best effort: a read-only state dir must not leave
+  --    this process stuck re-running the walk on every call.
+  local tmp = path.join(sd, MIGRATION_MARKER .. ".tmp")
+  local h = io.open(tmp, "wb")
+  if h then
+    h:write("schema = " .. tostring(MIGRATION_SCHEMA) .. "\n")
+    h:close()
+    os.rename(tmp, path.join(sd, MIGRATION_MARKER))
+  end
+
+  finish_migration(sd)
 end
 
 -- ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-ZETA (Zenith Energy Turbine Archiver) is a package manager written in Lua, it is the official package manager used in Haliade system.
+ZETA (Zenith Energy Turbine Archiver) is a package manager written in Lua, it is the official package manager used in HaliadeSYS.
 
 It is incredibly verbose by design and is pretty quick and supports 3 package formats :
 
@@ -8,4 +8,4 @@ and prebuilt tar.gz's and tar.xz.
 
 it is incredibly lightweight and is constantly maintained and updated.
 
-It also is alive.
+(It also is alive...)
