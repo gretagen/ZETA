@@ -30,6 +30,17 @@ local CLASSIC = { "/", "-", "\\", "|" }
 -- bash_loading_animations' BLA_braille_whitespace (MIT, Silejonu).
 spinner.BRAILLE = { "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷" }
 
+-- One braille frame per redraw. Progress counters redraw on their own tick
+-- (0.1s in the commit pool, once per entry otherwise), so advancing here is
+-- what animates the glyph -- no background process of its own. The cycle is
+-- shared: -Provide and -Delete never run at once, and a multi-package -Delete
+-- keeps animating across package boundaries instead of restarting.
+local braille_i = 0
+function spinner.next_frame()
+  braille_i = braille_i % #spinner.BRAILLE + 1
+  return spinner.BRAILLE[braille_i]
+end
+
 local tty
 local active = false
 local pidfile

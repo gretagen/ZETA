@@ -26,6 +26,7 @@ local archive = require("archive")
 local commit = require("commit")
 local db = require("db")
 local spinner = require("spinner")
+local profile = require("profile")
 
 -- Minimal, deliberately small PATH for subprocesses. Build tools must be
 -- declared as dependencies of the package; we never inherit a host PATH.
@@ -587,6 +588,9 @@ function builder.commit_all(items, opts)
   path.mkdir_p(dir)
 
   -- The counter's denominator is known before the first file moves.
+  -- Timed as its own sub-phase: this serial tree-walk is what the pool later
+  -- repeats per worker, so the receipt should show it separately.
+  profile.submark("count")
   local dest_root = cfg.root
   for _, it in ipairs(items) do
     if it.isolate_root then dest_root = it.isolate_root end
@@ -603,6 +607,7 @@ function builder.commit_all(items, opts)
   end
 
   log.step(("committing files to %s"):format(dest_root))
+  profile.submark("pool")
 
   local show_counter = spinner.enabled() and not cfg.verbose
   local settled, live, live_rel = 0, 0, nil
@@ -753,6 +758,9 @@ function builder.commit_all(items, opts)
     end
     path.remove_cleanup(hook)
   end
+
+  -- Pool done: wire/system-ops below belong to the phase, not to pool.
+  profile.close_sub()
 
   -- The transaction is over: settle the counter and summarize what landed.
   if failed then

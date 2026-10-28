@@ -147,17 +147,6 @@ function commit.count_owned(staging, whitelist)
   return #collect_owned(staging, whitelist)
 end
 
--- One braille frame per redraw. The batch counter is redrawn on a 0.1s tick
--- by builder's rolling pool (and once per entry otherwise), so advancing the
--- index here is what makes the glyph animate -- no background process of its
--- own. Frame sequence adapted from bash_loading_animations (MIT, Silejonu).
-local BRAILLE = spinner.BRAILLE
-local braille_i = 0
-local function next_frame()
-  braille_i = braille_i % #BRAILLE + 1
-  return BRAILLE[braille_i]
-end
-
 -- counter(done, total, final, rel) -- the live progress line the batch commit
 -- redraws across the whole transaction: glyph, count, then the entry that was
 -- just placed. Written in place, and settled with a newline when final -- the
@@ -166,7 +155,7 @@ end
 function commit.counter(done, total, final, rel)
   local n = paint(final and "green" or "blue", tostring(done))
   local tot = paint("cyan", tostring(total))
-  local g = next_frame()
+  local g = spinner.next_frame()
   local where = (not final and rel) and (" " .. paint("dim", rel)) or ""
   if final then
     io.write(("\r\27[K%s - [ provided %s | %s entries ]%s\n"):format(g, n, tot, where))
@@ -261,7 +250,7 @@ function commit.apply(staging, opts)
       local n = paint("blue", tostring(done))
       local tot = paint("cyan", tostring(total))
       local p = paint("dim", path.join(root, e.rel))
-      io.write(("\r\27[K%s - [ provided %s | %s entries ] %s"):format(next_frame(), n, tot, p))
+      io.write(("\r\27[K%s - [ provided %s | %s entries ] %s"):format(spinner.next_frame(), n, tot, p))
       io.flush()
     end
 
@@ -282,7 +271,7 @@ function commit.apply(staging, opts)
   if not batch and not verbose and total > 0 and use_tty then
     local n = paint("green", tostring(total))
     local tot = paint("cyan", tostring(total))
-    io.write(("\r\27[K  [ provided %s | %s entries ] %s\n"):format(n, tot, next_frame()))
+    io.write(("\r\27[K%s - [ provided %s | %s entries ]\n"):format(spinner.next_frame(), n, tot))
     io.flush()
   end
 

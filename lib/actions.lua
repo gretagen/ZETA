@@ -24,6 +24,7 @@ local fetch = require("fetch")
 local spinner = require("spinner")
 local reserve = require("reserve")
 local quotes = require("quotes")
+local profile = require("profile")
 
 local HELP = [[
 Zeta -- Haliade system package manager
@@ -214,6 +215,7 @@ end
 -- --isolate the whole store is rebuilt as a unit (target included).
 
 function actions._install(name, flags, opts)
+	profile.mark("resolve")
 	local source = opts.source
 	local base = config.get().local_packages
 	local isolate = flags.isolate == true
@@ -418,10 +420,14 @@ function actions._install(name, flags, opts)
 	else
 		confirm_msg = ("Provided %d package(s)?"):format(#plan)
 	end
+	-- The plan is on screen: end resolve here so time spent thinking at the
+	-- prompt is not billed to any phase (the receipt reports work, not you).
+	profile.close()
 	if not confirm(confirm_msg, flags.pass) then
 		log.abort("aborted by user")
 		return 0
 	end
+	profile.mark("fetch")
 
 	local installed = {}
 	local pre_fetched = {}
@@ -477,6 +483,7 @@ function actions._install(name, flags, opts)
 
 	-- Phase 2: Verify every downloaded payload before touching the system:
 	-- a corrupt archive aborts here, with nothing extracted or committed.
+	profile.mark("verify")
 	local verify_items = {}
 	for _, item in ipairs(todo) do
 		verify_items[#verify_items + 1] = {
@@ -489,6 +496,7 @@ function actions._install(name, flags, opts)
 		log.error(tostring(verr))
 		return 1
 	end
+	profile.mark("extract")
 
 	-- A store is self-contained: nothing outside references its internals
 	-- (only profile wrappers, recreated below), so a reinstall starts clean.
@@ -545,6 +553,7 @@ function actions._install(name, flags, opts)
 
 	-- Phase 4: Commit and record each staged package. Up to N provides run at
 	-- a time; the next one starts as soon as a slot frees.
+	profile.mark("commit")
 	local commit_items = {}
 	for _, item in ipairs(todo) do
 		commit_items[#commit_items + 1] = {
@@ -564,6 +573,7 @@ function actions._install(name, flags, opts)
 		force = flags.force,
 		jobs = flags.jobs or config.get().jobs,
 	})
+	profile.close()
 	if not cok then
 		log.error(tostring(cerr))
 		return 1
@@ -996,17 +1006,21 @@ local function delete_files(files, pkg_name, owner_index)
 
     done = done + 1
     if show_progress then
-      io.write(("\r\27[K  [ deleted %s | %s files ] %s"):format(
+      -- path.join, not the `p` below: that one is scoped to the else-branch
+      -- above and would resolve to a global here.
+      io.write(("\r\27[K%s - [ deleted %s | %s entries ] %s"):format(
+        spinner.next_frame(),
         del_paint("blue", tostring(done)),
         del_paint("cyan", tostring(total)),
-        del_paint("dim", rel)))
+        del_paint("dim", path.join(root, rel))))
       io.flush()
     end
   end
 
   -- Final green count; replaces the live line.
   if show_progress then
-    io.write(("\r\27[K  [ deleted %s | %s files ]\n"):format(
+    io.write(("\r\27[K%s - [ deleted %s | %s entries ]\n"):format(
+      spinner.next_frame(),
       del_paint("green", tostring(total)),
       del_paint("cyan", tostring(total))))
     io.flush()
@@ -1250,7 +1264,7 @@ function actions.delete(names, flags)
   -- 8) Execute deletions.
   for _, e in ipairs(plan) do
     local m = db.get(e.name)
-    log.step(("deleting %s-%s (%d files)"):format(e.name, e.version, #e.files))
+    log.step(("deleting %s-%s (%d entries)"):format(e.name, e.version, #e.files))
     delete_files(e.files, e.name, owner_index)
     db.delete(e.name)
     for _, d in ipairs(m and m.deps or {}) do
@@ -1290,6 +1304,9 @@ function actions.transcend(flags)
 		return 0
 	end
 
+	-- Marked after the no-op guards above: a run that never checks anything
+	-- records nothing and prints no receipt.
+	profile.mark("resolve")
 	local results = fetch.get_parallel(items, { label = "checking for packages to transcend" })
 	local manifest_cache = {}
 	for i, result in ipairs(results) do
@@ -1349,10 +1366,13 @@ function actions.transcend(flags)
 	end
 	print("")
 
+	-- Same rule as -Provide: the prompt's think time belongs to no phase.
+	profile.close()
 	if not confirm(("Transcend %d package(s)?"):format(#upgrades), flags.pass) then
 		log.abort("aborted by user")
 		return 0
 	end
+	profile.mark("fetch")
 
 	-- Phase 2: Pre-fetch all payloads in parallel.
 	local pre_fetched = {}
@@ -1390,6 +1410,7 @@ function actions.transcend(flags)
 
 	-- Phase 3: Verify every downloaded payload before touching the system:
 	-- a corrupt archive aborts here, with nothing extracted or committed.
+	profile.mark("verify")
 	local verify_items = {}
 	for _, u in ipairs(upgrades) do
 		verify_items[#verify_items + 1] = {
@@ -1402,6 +1423,7 @@ function actions.transcend(flags)
 		log.error(tostring(verr))
 		return 1
 	end
+	profile.mark("extract")
 
 	-- Phase 4: Extract and build every upgrade into its staging tree. Nothing
 	-- commits until every package has been staged successfully.
@@ -1426,6 +1448,7 @@ function actions.transcend(flags)
 
 	-- Phase 5: Commit and record each staged upgrade. Up to N provides run at
 	-- a time; the next one starts as soon as a slot frees.
+	profile.mark("commit")
 	local commit_items = {}
 	for _, u in ipairs(upgrades) do
 		commit_items[#commit_items + 1] = {
@@ -1439,6 +1462,7 @@ function actions.transcend(flags)
 		force = true,
 		jobs = flags.jobs or config.get().jobs,
 	})
+	profile.close()
 	if not cok then
 		log.error(tostring(cerr))
 		return 1
