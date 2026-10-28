@@ -189,7 +189,7 @@ local function check_libraries(files, root)
 		log.warn(("%d Libraries unresolved, you may need to report to package maintenance."):format(#unresolved))
 		print(("unresolved libraries : %s,"):format(table.concat(unresolved, ", ")))
 	else
-		log.ok("all libraries resolve")
+		log.ok("All libraries have been resolved.")
 	end
 end
 
