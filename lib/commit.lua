@@ -395,21 +395,20 @@ function commit.run_system_ops(opts)
   local usretc = root .. "/usr/etc"
   if path.exists(usretc) then
     log.step("mirroring usr/etc configs into /etc")
-    local mirror = string.format([[
-R=%s
-R=${R%/}
+    -- Built by concatenation, not string.format: the script contains shell
+    -- ${var%pattern} syntax whose bare % breaks Lua's format conversions.
+    local mirror = "R=" .. path.quote(root) .. "\n" .. [[R=${R%/}
 find "$R/usr/etc" -type f 2>/dev/null | while IFS= read -r f; do
   rel=${f#"$R/usr/etc/"}
   dest="$R/etc/$rel"
   [ -e "$dest" ] && continue
   mkdir -p "$(dirname "$dest")"
-  n=$(printf '%%s' "$rel" | tr -cd / | wc -c)
+  n=$(printf '%s' "$rel" | tr -cd / | wc -c)
   ups="../"
   i=$n
   while [ "$i" -gt 0 ]; do ups="../$ups"; i=$((i-1)); done
   ln -s "${ups}usr/etc/$rel" "$dest" || exit 1
-done
-]], path.quote(root))
+done]]
     if path.run(mirror) then
       log.ok("usr/etc configs linked into /etc (absent files only)")
     else
