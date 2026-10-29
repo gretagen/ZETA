@@ -344,6 +344,32 @@ function commit.run_system_ops(opts)
     else
       log.warn("ldconfig failed (non-fatal, but libraries may not be found at runtime)")
     end
+
+    -- Image-loader / desktop caches, regenerated per install so a fresh
+    -- system reaches full icon and menu state without manual steps: only
+    -- png/jpeg loaders are builtin to gdk-pixbuf (svg/gif/tiff resolve
+    -- through the loaders cache), and desktop/menu association lookups
+    -- read the desktop database. Best-effort, like ldconfig above.
+    log.step("Regenerating gdk-pixbuf loaders cache")
+    if path.run("gdk-pixbuf-query-loaders --update-cache") then
+      log.ok("gdk-pixbuf loaders.cache updated")
+    else
+      log.warn("gdk-pixbuf-query-loaders failed (non-fatal, dynamic loaders may be unreachable)")
+    end
+
+    log.step("Updating desktop database")
+    if path.run("update-desktop-database /usr/share/applications") then
+      log.ok("desktop database updated")
+    else
+      log.warn("update-desktop-database failed (non-fatal, menu associations may be stale)")
+    end
+
+    log.step("Updating icon theme caches")
+    if path.run("for d in /usr/share/icons/*/; do if [ -f \"$d/index.theme\" ]; then gtk-update-icon-cache -q -f -t \"$d\" || true; fi; done") then
+      log.ok("icon theme caches updated")
+    else
+      log.warn("gtk-update-icon-cache failed (non-fatal)")
+    end
   end
 
   -- Auto-compile GSettings schemas if any were installed (rooted at whatever
@@ -356,6 +382,38 @@ function commit.run_system_ops(opts)
       log.ok("gschemas.compiled generated")
     else
       log.warn("glib-compile-schemas failed (non-fatal)")
+    end
+  end
+
+  -- The distro convention keeps package configs under usr/etc (prefix-owned
+  -- tree), but nothing reads them there: XDG, dhcpcd, avahi et al all look
+  -- in /etc. Mirror every file from <root>/usr/etc into <root>/etc as a
+  -- RELATIVE symlink so isolated stores stay self-contained and package
+  -- upgrades take effect through the same path. Never overwrites an
+  -- existing /etc file (other packages own those directly), and is
+  -- idempotent — it also heals systems installed before this hook existed.
+  local usretc = root .. "/usr/etc"
+  if path.exists(usretc) then
+    log.step("mirroring usr/etc configs into /etc")
+    local mirror = string.format([[
+R=%s
+R=${R%/}
+find "$R/usr/etc" -type f 2>/dev/null | while IFS= read -r f; do
+  rel=${f#"$R/usr/etc/"}
+  dest="$R/etc/$rel"
+  [ -e "$dest" ] && continue
+  mkdir -p "$(dirname "$dest")"
+  n=$(printf '%%s' "$rel" | tr -cd / | wc -c)
+  ups="../"
+  i=$n
+  while [ "$i" -gt 0 ]; do ups="../$ups"; i=$((i-1)); done
+  ln -s "${ups}usr/etc/$rel" "$dest" || exit 1
+done
+]], path.quote(root))
+    if path.run(mirror) then
+      log.ok("usr/etc configs linked into /etc (absent files only)")
+    else
+      log.warn("usr/etc mirroring failed (non-fatal, /etc configs may be absent)")
     end
   end
 end
