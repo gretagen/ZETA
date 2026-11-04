@@ -293,4 +293,76 @@ suite:test("allow_root_files opts out of the root-file guard", function()
   lib.assert_true(lib.exists(path.join(dir, "stray.0")))
 end)
 
+local function py_str(s)
+  s = s:gsub("\\", "\\\\"):gsub("\"", "\\\""):gsub("\n", "\\n"):gsub("\r", "\\r")
+  return "\"" .. s .. "\""
+end
+
+local function build_zip(dir, files, symlinks)
+  local out = path.join(dir, "out.zip")
+  local py = { "import zipfile, stat, sys", "zf = zipfile.ZipFile(sys.argv[1], 'w')" }
+  for _, f in ipairs(files) do
+    py[#py + 1] = "zf.writestr(" .. py_str(f[1]) .. ", " .. py_str(f[2]) .. ")"
+  end
+  for _, s in ipairs(symlinks or {}) do
+    py[#py + 1] = ("zi = zipfile.ZipInfo(%s); zi.create_system = 3"):format(py_str(s[1]))
+    py[#py + 1] = ("zi.external_attr = (0o120777 << 16); zf.writestr(zi, %s)"):format(py_str(s[2]))
+  end
+  py[#py + 1] = "zf.close()"
+  local script = path.join(dir, "mkzip.py")
+  lib.write(script, table.concat(py, "\n"))
+  os.execute("python3 " .. path.quote(script) .. " " .. path.quote(out) .. " 2>/dev/null")
+  return out
+end
+
+suite:test("extracts a zip (strip=0)", function()
+  local dir = lib.tmpdir("zip-extract")
+  local z = build_zip(dir, { { "usr/bin/hello", "#!/bin/sh\necho hi\n" }, { "LICENSE", "OFL\n" } })
+  local dest = lib.tmpdir("zip-stage")
+  local entries, err = archive.extract(z, dest, { strip = 0 })
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_eq(lib.read(path.join(dest, "usr/bin/hello")), "#!/bin/sh\necho hi\n")
+  lib.assert_eq(lib.read(path.join(dest, "LICENSE")), "OFL\n")
+end)
+
+suite:test("extracts a zip with strip=1 via temp move", function()
+  local dir = lib.tmpdir("zip-strip")
+  local z = build_zip(dir, { { "pkg-1.0/usr/bin/hello", "#!/bin/sh\necho hi\n" } })
+  local dest = lib.tmpdir("zip-strip-stage")
+  local entries, err = archive.extract(z, dest, { strip = 1, tmp_dir = dir })
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_true(lib.exists(path.join(dest, "usr/bin/hello")))
+  lib.assert_false(lib.exists(path.join(dest, "pkg-1.0")))
+end)
+
+suite:test("rejects a zip member escaping the root", function()
+  local dir = lib.tmpdir("zip-evil")
+  local z = build_zip(dir, { { "../../escape", "boom" } })
+  local dest = lib.tmpdir("zip-evil-stage")
+  local entries, err = archive.extract(z, dest, { strip = 0 })
+  lib.assert_nil(entries)
+  lib.assert_contains(err, "escapes")
+  lib.assert_false(lib.exists(path.join(dest, "escape")))
+end)
+
+suite:test("rejects an escaping symlink in a zip before extraction", function()
+  local dir = lib.tmpdir("zip-evil-sym")
+  local z = build_zip(dir, { { "legit.txt", "ok" } },
+    { { "evil", "../../../../etc/passwd" } })
+  local dest = lib.tmpdir("zip-evil-sym-stage")
+  local entries, err = archive.extract(z, dest, { strip = 0 })
+  lib.assert_nil(entries)
+  lib.assert_contains(err, "escapes")
+end)
+
+suite:test("keeps in-root zip symlinks as symlinks", function()
+  local dir = lib.tmpdir("zip-sym")
+  local z = build_zip(dir, { { "usr/lib/libreal.so", "elf" } },
+    { { "usr/lib/libfake.so", "libreal.so" } })
+  local dest = lib.tmpdir("zip-sym-stage")
+  local entries, err = archive.extract(z, dest, { strip = 0 })
+  lib.assert_true(entries ~= nil, tostring(err))
+  lib.assert_true(lib.is_symlink(path.join(dest, "usr/lib/libfake.so")))
+end)
+
 return suite

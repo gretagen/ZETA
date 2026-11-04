@@ -1,4 +1,5 @@
--- archive.lua -- tar inspection, safe extraction, and Debian (.deb) payloads.
+-- archive.lua -- tar inspection, safe extraction, Debian (.deb) payloads,
+-- and plain zip archives.
 --
 -- Extraction is a two-phase process: list the archive and validate every
 -- member (no absolute paths, no ".." escapes, symlink targets that stay
@@ -203,6 +204,104 @@ local function check_root_files(entries, strip)
   return true
 end
 
+-- Zip members are listed with `zipinfo -1` (names, dirs carry a trailing
+-- slash). Zip stores unix file attributes, so a second `zipinfo` table
+-- pass detects symlinks BEFORE anything is extracted — preserving the
+-- two-phase promise for hostile archives — and their targets are read from
+-- the entry content (`unzip -p`). Zip has no --strip: strip=0 extracts
+-- straight into the destination, strip>0 extracts to a temp tree and moves
+-- the surviving members with their leading components dropped.
+function archive.extract_zip(zip_file, dest, opts)
+  opts = opts or {}
+  local strip = opts.strip or 0
+
+  -- Pass 1: member names.
+  local nf = path.popen("zipinfo -1 " .. path.quote(zip_file) .. " 2>/dev/null")
+  if not nf then return nil, "could not run zipinfo" end
+  local entries = {}
+  local bypath = {}
+  for line in nf:lines() do
+    local name = line
+    local is_dir = name:sub(-1) == "/"
+    if is_dir then name = name:sub(1, -2) end
+    local rel = rel_of(name)
+    if rel ~= "" then
+      local e = { path = rel, type = is_dir and "dir" or "file", raw = name }
+      entries[#entries + 1] = e
+      bypath[rel] = e
+    end
+  end
+  nf:close()
+  if #entries == 0 then
+    return nil, ("no zip members in %s"):format(path.basename(zip_file))
+  end
+
+  -- Pass 2: unix attribute table — symlink entries get their type and
+  -- target before any validation or extraction happens.
+  local sf = path.popen("zipinfo " .. path.quote(zip_file) .. " 2>/dev/null")
+  if sf then
+    for line in sf:lines() do
+      if line:sub(1, 1) == "l" then
+        local name = line:match("%d%d:%d%d%s+(.*)$")
+        local e = name and bypath[rel_of(name)]
+        if e then
+          e.type = "symlink"
+          local tf = path.popen("unzip -p " .. path.quote(zip_file)
+            .. " " .. path.quote(name) .. " 2>/dev/null")
+          e.target = tf and (tf:read("*l") or "") or ""
+          if tf then tf:close() end
+        end
+      end
+    end
+    sf:close()
+  end
+
+  local ok, verr = archive.validate(entries)
+  if not ok then return nil, verr end
+  if not opts.allow_root_files then
+    local rok, rerr = check_root_files(entries, strip)
+    if not rok then return nil, rerr end
+  end
+
+  if strip == 0 then
+    log.detail(("archive: extracting %s (zip)"):format(path.basename(zip_file)))
+    if not path.run("unzip -q -o -d " .. path.quote(dest) .. " " .. path.quote(zip_file)) then
+      return nil, ("failed to extract %s"):format(zip_file)
+    end
+    return entries
+  end
+
+  -- strip > 0: unzip into a temp tree, then move each surviving member
+  -- with its leading `strip` components dropped.
+  local tmp = path.join(opts.tmp_dir or config.get().tmp_dir,
+    "zeta-zip-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999)))
+  path.mkdir_p(tmp)
+  if not path.run("unzip -q -o -d " .. path.quote(tmp) .. " " .. path.quote(zip_file)) then
+    os.execute("rm -rf " .. path.quote(tmp))
+    return nil, ("failed to extract %s"):format(zip_file)
+  end
+  log.detail(("archive: extracting %s (zip, strip %d)"):format(path.basename(zip_file), strip))
+  for _, e in ipairs(entries) do
+    if e.type ~= "dir" then
+      local rel = e.path
+      for _ = 1, strip do
+        rel = rel:match("^[^/]+/(.*)$")
+        if not rel then break end
+      end
+      if rel and rel ~= "" then
+        local target = path.join(dest, rel)
+        path.mkdir_p(path.dirname(target))
+        if not path.run("mv -f " .. path.quote(path.join(tmp, e.path)) .. " " .. path.quote(target)) then
+          os.execute("rm -rf " .. path.quote(tmp))
+          return nil, ("failed to place %s"):format(e.path)
+        end
+      end
+    end
+  end
+  os.execute("rm -rf " .. path.quote(tmp))
+  return entries
+end
+
 -- Extract `archive_file` into `dest`. Returns the validated entries, or
 -- nil, err if validation or extraction fails. Dispatches on the archive's
 -- own filename so format-specific handling (deb payloads, Arch metadata)
@@ -215,6 +314,9 @@ function archive.extract(archive_file, dest, opts)
   end
   if name:match("%.pkg%.tar%.zst$") or name:match("%.pkg%.tar%.xz$") then
     return archive.extract_arch_pkg(archive_file, dest, opts)
+  end
+  if name:match("%.zip$") or name:match("%.whl$") then
+    return archive.extract_zip(archive_file, dest, opts)
   end
   return archive.extract_tar(archive_file, dest, opts)
 end
