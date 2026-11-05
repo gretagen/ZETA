@@ -389,6 +389,14 @@ function builder.stage_one(manifest, opts)
       log.step(("running install function for %s"):format(name))
       manifest.install(p)
     end
+
+    -- An install hook may accompany an archive payload: it runs after
+    -- extraction (ownership/mode fixes that staging cannot express, e.g.
+    -- dbus-daemon-launch-helper root:messagebus 4750).
+    if manifest.archive and manifest.install then
+      log.step(("running install hook for %s"):format(name))
+      manifest.install(p)
+    end
   end)
 
   if not ok then
@@ -894,6 +902,14 @@ function builder.test(manifest, opts)
         if top then p:cd(top) end
       end
       log.step(("running install function for %s"):format(name))
+      manifest.install(p)
+    end
+
+    -- An install hook may accompany an archive payload: it runs after
+    -- extraction (ownership/mode fixes that staging cannot express, e.g.
+    -- dbus-daemon-launch-helper root:messagebus 4750).
+    if manifest.archive and manifest.install then
+      log.step(("running install hook for %s"):format(name))
       manifest.install(p)
     end
 
