@@ -158,9 +158,13 @@ function manifest.normalize(raw)
     m.test = raw.test
   end
 
-  -- Exactly one install strategy is allowed.
+  -- Exactly one install strategy is allowed — except that an install
+  -- function may accompany an archive as a post-extract hook (ownership/
+  -- mode fixes the staging user cannot express, e.g. the dbus launch
+  -- helper root:messagebus 4750).
   local count = (m.archive and 1 or 0) + (m.install and 1 or 0) + (m.build and 1 or 0)
-  if count ~= 1 then
+  local hook_ok = m.archive ~= nil and m.install ~= nil and m.build == nil
+  if count ~= 1 and not hook_ok then
     error(("manifest: package %q needs exactly one of archive/install/build"):format(name), 2)
   end
 
