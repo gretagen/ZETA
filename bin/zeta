@@ -81,6 +81,9 @@ case "$cmd" in
                 "Well that's embarassing."
                 "*cough cough* root access... *cough cough*"
                 "N-no! not without root baka...."
+                "Picture this: you want to install a package, and everyone in the system will use it; BE ROOT"
+                "What's the magic word?"
+                "Who's gonna tell him?"
             )
 
             # Select a random quote from the array
