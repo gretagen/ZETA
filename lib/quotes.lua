@@ -186,6 +186,7 @@ local quotes = {
     "Tell v1sta he made trees grow.",
     "Tell Serena I got this!",
     "Accept the EULA",
+    "hi -v1sta",
     },
 
   localize = {
@@ -441,7 +442,7 @@ local quotes = {
     "Beamy's going to ban you because :",
     "Pure exasperation because :",
     "Gretagen is going to mute you because: ",
-    "Can you explain to me whats this?: ",
+    "Can you explain to me what this is?: ",
  },
 
   okay = {
