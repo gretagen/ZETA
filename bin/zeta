@@ -83,7 +83,7 @@ case "$cmd" in
                 "N-no! not without root baka...."
                 "Picture this: you want to install a package, and everyone in the system will use it; BE ROOT"
                 "What's the magic word?"
-                "Who's gonna tell him?"
+                "Who's gonna tell them?"
             )
 
             # Select a random quote from the array
