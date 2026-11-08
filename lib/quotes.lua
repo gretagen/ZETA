@@ -441,8 +441,8 @@ local quotes = {
     "Pay attention to the static :",
     "Beamy's going to ban you because :",
     "Pure exasperation because :",
-    "Gretagen is going to mute you because: ",
-    "Can you explain to me what this is?: ",
+    "Gretagen is going to mute you because : ",
+    "Can you explain to me what this is? : ",
  },
 
   okay = {
