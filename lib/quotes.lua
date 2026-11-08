@@ -234,7 +234,7 @@ local quotes = {
     "Shared library not found I suppose?",
     "Remember to report any bugs on the github!",
     "Let us restore what was lost. Trust the system.",
-    "yo bro trust me"
+    "yo bro trust me",
   },
 
   slowdownload = {
@@ -259,7 +259,7 @@ local quotes = {
    "BRO WDYM SLOW I HAVE GIGABIT - Beamy",
    "Even trees grow faster than this...",
    "Even Avianca's Wi-Fi is Faster!",
-   "Temu ships faster than this.."
+   "Temu ships faster than this..",
    
   },
 
@@ -278,7 +278,7 @@ local quotes = {
     "Doctor, are you sure this will work?",
     "Sandboxing your package so the filthy outside world can't touch what's mine.",
     "Isolating package in a sandbox environment. Total containment achieved.",
-    "Mom.. will it work?.."
+    "Mom.. will it work?..",
     
     
   },
@@ -310,7 +310,7 @@ local quotes = {
     "It's just the way we're wired.",
     "HOLD IT RIGHT THERE! :",
     "STOP RIGHT THERE! :",
-    "Another mr. robot clone..."
+    "Another mr. robot clone...",
   },
 
   error = {
@@ -385,8 +385,8 @@ local quotes = {
   	"Oh boy... Things are getting very hard here.",
   	"You have reached your limit on error-free zeta operations, buy HaliadeSYS Pro now for garanteed flawless operations!",
   	"Bailing out, you're on your own now. Good luck.",
-    "yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep code rot yep yep yep yep yep yep yep yep may god save us all yep yep yep yep yep yep yep yep"
-    "POV: When your barber says sorry"
+    "yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep code rot yep yep yep yep yep yep yep yep may god save us all yep yep yep yep yep yep yep yep",
+    "POV: When your barber says sorry",
   	
   },
 
@@ -440,8 +440,8 @@ local quotes = {
     "Pay attention to the static :",
     "Beamy's going to ban you because :",
     "Pure exasperation because :",
-    "Gretagen is going to mute you because: "
-    "Can you explain me whats this?: "
+    "Gretagen is going to mute you because: ",
+    "Can you explain me whats this?: ",
  },
 
   okay = {
@@ -510,7 +510,7 @@ local quotes = {
   	"And we're done here.",
   	"That went remarkably well.",
   	"You're lucky I'm even here to do your package management.",
-    "Finally u did something..."
+    "Finally u did something...",
   },
 
   userno = {
