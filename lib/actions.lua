@@ -37,6 +37,8 @@ Commands:
   -LocalProvide <pkg>...  Install packages from the local /packages tree
   -Solve <pkg>...         Repair a package by reinstalling its direct
                           dependencies (the package itself is left intact).
+                          Base libraries (glibc, ncurses, bash, ...) are
+                          never touched -- see do_not_solve.
                           With --isolate, rebuild its whole reserved store
                           instead.
   -Transcend              Update all installed packages to their latest versions
@@ -85,6 +87,10 @@ Configuration:
       verbose = false,
       quotes = false,
       jobs = nproc, -- every core (or a plain number)
+      -- Packages -Solve never reinstalls. REPLACES the built-in list
+      -- (glibc, ncurses, bash, gcc, openssl, ...), so copy those names
+      -- first if you want to extend it rather than swap it out.
+      do_not_solve = { "glibc", "ncurses" },
     }
 
 Installed state is tracked in three registries under /var/db/zeta:
@@ -205,6 +211,103 @@ local function plan_kind(item, target)
 		return (cur == "dependency") and "dependency" or "package"
 	end
 	return (cur == "package") and "package" or "dependency"
+end
+
+-- The pre-target extract row: one line that rewrites in place while every
+-- dependency (or upgrade) stages, showing the phase, its own counter and the
+-- entry being extracted.
+--
+-- Narration is gated off for the duration because any print between two
+-- redraws would push the row down and make it repaint on a new line; member
+-- listings are gated off through the same switch --silence uses
+-- (log.is_file_silent), so tar/Arch/.deb/zip all inherit it. Only step and
+-- detail are gated: error/warn/ok/info stay live, and they settle the row
+-- first through log.on_settle so a failure never lands on top of it.
+--
+-- Returns draw(i, label) and finish(completed). finish() settles the row and
+-- restores every gate, so callers call it on both the success and the failure
+-- path; pass `completed` on success so the row is repainted in its finished
+-- colour first -- a failure must never leave a green "all done" line behind.
+local function begin_extract_row(noun, total)
+	local prev_silent = log.is_file_silent()
+	local prev_narration = log.set_narration(false)
+	log.set_file_silent(true)
+	local tty = spinner.enabled()
+
+	-- row_open: a row has been written but not newline-terminated. animated: a
+	-- background loop is drawing it, so settle has to kill it (keeping what it
+	-- drew) instead of just ending the line.
+	local row_open = false
+	local animated = false
+	local last_label
+
+	-- The row body: everything that follows the meter. `label` is nil for the
+	-- opening [ 0/N ] state so the line does not end in a space.
+	--
+	-- The progress number is cyan while dependencies land and green only once
+	-- every one of them has staged. Completion is passed in explicitly rather
+	-- than derived from `i >= total`: with a single dependency that test is
+	-- already true on the first (and only) iteration, which would turn the row
+	-- green while it was still extracting. The total stays cyan and the label
+	-- is grey, matching the colours the provide counter uses.
+	local function body(i, label, completed)
+		local s = (" - Extracting %s... [ %s/%s ]"):format(noun,
+			log.paint(completed and "green" or "cyan", tostring(i)),
+			log.paint("cyan", tostring(total)))
+		if label then s = s .. " " .. log.paint("dim", label) end
+		return s
+	end
+
+	-- Settle the row: kill the animation (TTY) or end the line (piped).
+	-- keep_row leaves whatever the meter last drew in place as a record of the
+	-- phase. Wired into log so a warn/error printed mid-extraction never lands
+	-- on top of the live row; finish() calls it too, and both no-op once
+	-- settled.
+	local function settle()
+		if not row_open then return end
+		row_open = false
+		if animated then
+			animated = false
+			spinner.stop(true)
+		else
+			io.write("\n")
+		end
+	end
+	log.on_settle(settle)
+
+	-- Paint the row: the meter animates at column 0 on a terminal, and is
+	-- frozen to its first frame when output is going somewhere piped. Clearing
+	-- first also drops any row left over from an earlier phase, so start_row
+	-- always gets the line to itself.
+	local function paint(post, animate)
+		local animate_row = tty and animate
+		if tty then spinner.stop() end
+		if animate_row then
+			spinner.start_row("", post)
+		else
+			io.write("\r\27[K" .. spinner.METRO[1] .. post)
+			io.flush()
+		end
+		animated = animate_row
+		row_open = true
+	end
+
+	paint(body(0, nil, false), true)
+
+	local function draw(i, label)
+		last_label = label
+		paint(body(i, label, false), true)
+	end
+
+	local function finish(completed)
+		if completed then paint(body(total, last_label, true), false) end
+		settle()
+		log.on_settle(nil)
+		log.set_narration(prev_narration)
+		log.set_file_silent(prev_silent)
+	end
+
+	return draw, finish
 end
 
 -- Shared install flow for -Provide / -LocalProvide / -ReProvide / -Solve.
@@ -349,13 +452,24 @@ function actions._install(name, flags, opts)
 		if not target_manifest then
 			ok, plan = false, ("cannot resolve package %q"):format(name)
 		else
+			-- Base libraries are never reinstalled from here: swapping them
+			-- under a running system is what makes every later shell print
+			-- "no version information available". `direct_only` is only true
+			-- when not isolating, so the isolate exemption is already handled
+			-- by that flag. Skipping before the fetch also avoids pulling the
+			-- manifest for a dep we are not going to touch.
+			local protected = config.get().do_not_solve
 			for _, dep in ipairs(target_manifest.deps or {}) do
-				local m = cached_fetch_manifest(dep.name)
-				if not m then
-					ok, plan = false, ("cannot resolve dependency %q"):format(dep.name)
-					break
+				if protected[dep.name] then
+					log.detail(("skipping %s as solving it would break the system"):format(dep.name))
+				else
+					local m = cached_fetch_manifest(dep.name)
+					if not m then
+						ok, plan = false, ("cannot resolve dependency %q"):format(dep.name)
+						break
+					end
+					plan[#plan + 1] = { name = dep.name, manifest = m }
 				end
-				plan[#plan + 1] = { name = dep.name, manifest = m }
 			end
 		end
 	else
@@ -530,14 +644,47 @@ function actions._install(name, flags, opts)
 
 	-- Phase 3: Extract and build every package into its staging tree. Nothing
 	-- commits until every package has been staged successfully.
+	--
+	-- Two phases, each with its own counter: the dependencies stage behind one
+	-- row that rewrites in place, then the last archive extracts alone with
+	-- its member listing -- that final listing is the package the user
+	-- actually asked for. --silence still suppresses it.
 	local staged = {}
 	local total = #todo
-	log.step(("Beginning extracts... - [ 0/%d ]"):format(total))
-	for i, item in ipairs(todo) do
-		local m = item.manifest
-		local payload = pre_fetched[item.name]
-		local label = payload and path.basename(payload) or (m.name .. "-" .. m.version)
-		log.step(("Extracting %s... - [ %d/%d ]"):format(label, i, total))
+	local n_deps = total - 1
+
+	if n_deps > 0 then
+		local draw, finish = begin_extract_row("dependencies", n_deps)
+		for i = 1, n_deps do
+			local item = todo[i]
+			local m = item.manifest
+			local payload = pre_fetched[item.name]
+			draw(i, payload and path.basename(payload) or (m.name .. "-" .. m.version))
+			local sok, staged_item = pcall(builder.stage_one, m, {
+				local_dir = m._local_dir,
+				payload = payload,
+				verified = true,
+			})
+			if not sok then
+				finish()
+				for _, s in pairs(staged) do builder.discard_staged(s) end
+				log.error(tostring(staged_item))
+				return 1
+			end
+			staged[item.name] = staged_item
+		end
+		finish(true)
+	end
+
+	-- The last archive: the member listing the user asked for. Guarded --
+	-- `todo` is empty when every plan item was already provided and nothing
+	-- was --force'd, and todo[0] would be nil.
+	if total > 0 then
+		local last = todo[total]
+		local m = last.manifest
+		local payload = pre_fetched[last.name]
+		log.step(("Extracting %s... - [ 1/1 ]"):format(
+			payload and path.basename(payload) or (m.name .. "-" .. m.version)))
 		local sok, staged_item = pcall(builder.stage_one, m, {
 			local_dir = m._local_dir,
 			payload = payload,
@@ -548,7 +695,7 @@ function actions._install(name, flags, opts)
 			log.error(tostring(staged_item))
 			return 1
 		end
-		staged[item.name] = staged_item
+		staged[last.name] = staged_item
 	end
 
 	-- Phase 4: Commit and record each staged package. Up to N provides run at
@@ -716,6 +863,15 @@ function actions.solve(names, flags)
 				end
 				return 1
 			end
+		end
+		-- Replacing a base library under a running system floods every
+		-- subsequent shell with "no version information available" --
+		-- ZETA spawns shells for nearly every operation, so it ends up
+		-- drowning in its own output. Isolated solves are exempt: they
+		-- stage into /zeta/reserve/... and never touch the system copy.
+		if not isolate and config.get().do_not_solve[name] then
+			log.error(("%s is on the do-not-solve list; replacing it under a running system destabilises every linked process (use -ReProvide %s if you really mean to)"):format(name, name))
+			return 1
 		end
 		local ok = actions._install(name, {
 			pass = flags.pass,
@@ -1427,14 +1583,40 @@ function actions.transcend(flags)
 
 	-- Phase 4: Extract and build every upgrade into its staging tree. Nothing
 	-- commits until every package has been staged successfully.
+	--
+	-- Same shape as the install flow: the upgrades stage behind one row that
+	-- rewrites in place, then the last one extracts with its member listing.
 	local staged = {}
 	local total = #upgrades
-	log.step(("Beginning extracts... - [ 0/%d ]"):format(total))
-	for i, u in ipairs(upgrades) do
-		local payload = pre_fetched[u.name]
-		local label = payload and path.basename(payload) or (u.name .. "-" .. u.to)
-		log.step(("Extracting %s... - [ %d/%d ]"):format(label, i, total))
-		local sok, staged_item = pcall(builder.stage_one, u.manifest, {
+	local n_up = total - 1
+
+	if n_up > 0 then
+		local draw, finish = begin_extract_row("upgrades", n_up)
+		for i = 1, n_up do
+			local u = upgrades[i]
+			local payload = pre_fetched[u.name]
+			draw(i, payload and path.basename(payload) or (u.name .. "-" .. u.to))
+			local sok, staged_item = pcall(builder.stage_one, u.manifest, {
+				payload = payload,
+				verified = true,
+			})
+			if not sok then
+				finish()
+				for _, s in pairs(staged) do builder.discard_staged(s) end
+				log.error(tostring(staged_item))
+				return 1
+			end
+			staged[u.name] = staged_item
+		end
+		finish(true)
+	end
+
+	if total > 0 then
+		local last = upgrades[total]
+		local payload = pre_fetched[last.name]
+		log.step(("Extracting %s... - [ 1/1 ]"):format(
+			payload and path.basename(payload) or (last.name .. "-" .. last.to)))
+		local sok, staged_item = pcall(builder.stage_one, last.manifest, {
 			payload = payload,
 			verified = true,
 		})
@@ -1443,7 +1625,7 @@ function actions.transcend(flags)
 			log.error(tostring(staged_item))
 			return 1
 		end
-		staged[u.name] = staged_item
+		staged[last.name] = staged_item
 	end
 
 	-- Phase 5: Commit and record each staged upgrade. Up to N provides run at

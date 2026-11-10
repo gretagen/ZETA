@@ -16,6 +16,32 @@ local quiet = false
 -- only trims per-file noise, primarily to speed up slow terminals.
 local file_silent = false
 
+-- Narration gate: step/detail chatter while a live progress row owns the
+-- terminal line. A row is drawn with \r and no newline, so any print between
+-- two redraws pushes it down and it repaints on the next line -- gating is
+-- what lets the row genuinely rewrite in place. Only step/detail are gated:
+-- error/warn/ok/info/abort stay live so a failure is never swallowed.
+local narration = true
+
+-- Settled before any non-gated output. Registered only while such a row is
+-- actually live (see actions.lua), so it is a no-op everywhere else.
+local settle_hook
+
+function log.on_settle(fn)
+  settle_hook = fn
+end
+
+local function settle()
+  if settle_hook then settle_hook() end
+end
+
+-- Enable/disable per-phase narration. Returns the previous value.
+function log.set_narration(on)
+  local prev = narration
+  narration = on and true or false
+  return prev
+end
+
 -- Test harness hook: suppress all log output.
 function log.set_quiet(q)
   quiet = q and true or false
@@ -55,19 +81,25 @@ local function paint(color, s)
   return C[color] .. s .. C.reset
 end
 
+-- Public so progress rows outside this module share the same colour policy:
+-- TERM/NO_COLOR aware, plain text when colour is off.
+log.paint = paint
+
 function log.step(msg)
-  if quiet then return end
+  if quiet or not narration then return end
   print(paint("cyan", "==> " .. msg))
 end
 
 function log.ok(msg)
   if quiet then return end
+  settle()
   local q = quotes.is_enabled() and quotes.pick(quotes.okay) or nil
   print(paint("green", " " .. (q or "ok") .. "  " .. msg))
 end
 
 function log.warn(msg)
   if quiet then return end
+  settle()
   local q = quotes.is_enabled() and quotes.pick(quotes.warn) or nil
   if q then
     io.stderr:write(paint("yellow", q) .. " " .. msg .. "\n")
@@ -78,6 +110,7 @@ end
 
 function log.error(msg)
   if quiet then return end
+  settle()
   local q = quotes.is_enabled() and quotes.pick(quotes.error) or nil
   if q then
     io.stderr:write(paint("red", q) .. "\nCause : " .. msg .. "\n")
@@ -91,23 +124,25 @@ end
 -- fallback shown when quotes are disabled (--no-quote / quotes = false).
 function log.abort(msg)
   if quiet then return end
+  settle()
   local q = quotes.is_enabled() and quotes.pick(quotes.userno) or nil
   print(" -   " .. (q or (msg or "aborted by user")))
 end
 
 function log.info(msg)
   if quiet then return end
+  settle()
   print(" -   " .. msg)
 end
 
 function log.detail(msg)
-  if quiet then return end
+  if quiet or not narration then return end
   print(paint("dim", " .   " .. msg))
 end
 
 -- Print multiple detail messages in a single print() call for instant output.
 function log.detail_batch(msgs)
-  if quiet or #msgs == 0 then return end
+  if quiet or not narration or #msgs == 0 then return end
   local buf = {}
   for _, msg in ipairs(msgs) do
     buf[#buf + 1] = " .   " .. msg

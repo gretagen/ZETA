@@ -79,6 +79,7 @@ local quotes = {
     "Fine! Take it off your system! See if I care!",
     "I-it's not like I missed having this package around or anything!",
     "Why are you throwing away what we built together? Are you talking to another package manager behind my back?!",    
+    "noooo don't turn me into a ZETA quote - Silk",
   },
   forget = {
     "Scrubbing logs. History never happened.",
@@ -186,7 +187,7 @@ local quotes = {
     "Tell v1sta he made trees grow.",
     "Tell Serena I got this!",
     "Accept the EULA",
-    "hi -v1sta",
+    "hi - v1sta",
     },
 
   localize = {

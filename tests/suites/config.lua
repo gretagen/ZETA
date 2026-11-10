@@ -129,4 +129,54 @@ suite:test("repos defaults to the single zeta-index repository", function()
   lib.assert_eq(cfg.repo, "https://github.com/gretagen/zeta-index")
 end)
 
+-- do_not_solve: the packages -Solve must never reinstall. Replacing a base
+-- library under a running system leaves every later shell printing
+-- "no version information available", and ZETA shells out constantly.
+suite:test("do_not_solve defaults cover the packages that break a running system", function()
+  load(nil)
+  local s = config.get().do_not_solve
+  for _, n in ipairs({ "glibc", "ncurses", "libtinfo", "bash", "gcc", "openssl" }) do
+    lib.assert_true(s[n] == true, n .. " must be on the default do_not_solve list")
+  end
+  lib.assert_nil(s.hello, "an ordinary package must not be protected")
+end)
+
+suite:test("a do_not_solve table in the config file replaces the defaults", function()
+  local dir = lib.tmpdir("cfg-do-not-solve")
+  local file = path.join(dir, "configuration.lua")
+  local h = assert(io.open(file, "wb"))
+  h:write('return { do_not_solve = { "foo", "bar" } }\n')
+  h:close()
+
+  config.reset()
+  config.setenv("ZETA_ROOT", lib.tmpdir("cfg-dns-root"))
+  config.set_config_file(file)
+  local cfg = config.load(nil)
+
+  lib.assert_true(cfg.do_not_solve.foo == true, "config entry is kept")
+  lib.assert_true(cfg.do_not_solve.bar == true, "config entry is kept")
+  lib.assert_nil(cfg.do_not_solve.glibc, "the config list replaces the defaults")
+
+  -- Leave no residue for the rest of the suite: reset restores the default
+  -- config file path as well as the caches.
+  config.reset()
+end)
+
+suite:test("do_not_solve falls back to the defaults when the key is absent", function()
+  local dir = lib.tmpdir("cfg-no-do-not-solve")
+  local file = path.join(dir, "configuration.lua")
+  local h = assert(io.open(file, "wb"))
+  h:write('return { root = "/" }\n')
+  h:close()
+
+  config.reset()
+  config.set_config_file(file)
+  local cfg = config.load(nil)
+
+  lib.assert_true(cfg.do_not_solve.glibc == true, "absent key keeps the defaults")
+  lib.assert_true(cfg.do_not_solve.ncurses == true, "absent key keeps the defaults")
+
+  config.reset()
+end)
+
 return suite

@@ -214,6 +214,9 @@ end
 function archive.extract_zip(zip_file, dest, opts)
   opts = opts or {}
   local strip = opts.strip or 0
+  -- unzip lists members by default; -q mirrors the tar extractor's
+  -- `listing` gate so --silence and the quiet dependency phase both apply.
+  local quiet = log.is_file_silent() and "-q " or ""
 
   -- Pass 1: member names.
   local nf = path.popen("zipinfo -1 " .. path.quote(zip_file) .. " 2>/dev/null")
@@ -265,7 +268,7 @@ function archive.extract_zip(zip_file, dest, opts)
 
   if strip == 0 then
     log.detail(("archive: extracting %s (zip)"):format(path.basename(zip_file)))
-    if not path.run("unzip -q -o -d " .. path.quote(dest) .. " " .. path.quote(zip_file)) then
+    if not path.run("unzip " .. quiet .. "-o -d " .. path.quote(dest) .. " " .. path.quote(zip_file)) then
       return nil, ("failed to extract %s"):format(zip_file)
     end
     return entries
@@ -276,7 +279,7 @@ function archive.extract_zip(zip_file, dest, opts)
   local tmp = path.join(opts.tmp_dir or config.get().tmp_dir,
     "zeta-zip-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999)))
   path.mkdir_p(tmp)
-  if not path.run("unzip -q -o -d " .. path.quote(tmp) .. " " .. path.quote(zip_file)) then
+  if not path.run("unzip " .. quiet .. "-o -d " .. path.quote(tmp) .. " " .. path.quote(zip_file)) then
     os.execute("rm -rf " .. path.quote(tmp))
     return nil, ("failed to extract %s"):format(zip_file)
   end

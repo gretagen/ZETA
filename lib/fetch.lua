@@ -63,6 +63,19 @@ function fetch.downloader()
   return downloader or nil
 end
 
+-- Network flags appended to every curl/wget invocation.
+--
+-- ZETA used to pass none, so a stalled transfer waited out wget's default
+-- 900-second read timeout and its default 20 retries -- the reports of
+-- waiting 20 minutes for a single tarball. Both stall guards only fire when
+-- NO data arrives at all, so a slow-but-progressing download is never
+-- killed. There is deliberately no --max-time: a global cap would punish
+-- exactly the slow links these users have. curl gets 3 attempts via
+-- --retry 2 with a fixed 5s delay; wget's -t 3 gives 3 tries with its
+-- built-in 1..5s linear backoff (it has no fixed-interval option).
+local CURL_NET = "--connect-timeout 15 --speed-limit 1 --speed-time 15 --retry 2 --retry-delay 5"
+local WGET_NET = "--connect-timeout=15 --read-timeout=15 -t 3 --waitretry=5"
+
 -- Copy a file, creating parent directories. Used for file:// and local urls.
 function fetch.copy(src, dest)
   local f, err = io.open(src, "rb")
@@ -154,7 +167,7 @@ function fetch.get_with_progress(url, dest, label)
 
   local script
   if dl == "curl" then
-    script = "#!" .. path.shell .. "\n" .. [[trap 'kill 0; exit 130' INT
+    script = "#!" .. path.shell .. "\nNETFLAGS=" .. path.quote(dl == "curl" and CURL_NET or WGET_NET) .. "\n" .. [[trap 'kill 0; exit 130' INT
 URL="$1"
 LABEL="$2"
 PROG="$3"
@@ -174,7 +187,7 @@ BAR_WIDTH=35
 FRAMES="/ - \ |"
 FI=0
 
-curl -L --fail --show-error -o "$TMP" "$URL" 2>"$PROG" &
+curl -L --fail --show-error $NETFLAGS -o "$TMP" "$URL" 2>"$PROG" &
 CURL_PID=$!
 
 while kill -0 $CURL_PID 2>/dev/null; do
@@ -218,7 +231,7 @@ echo $? > "]]  .. dest .. ".rc" .. [["
 ]]
   else
     -- wget: suppress output, show indeterminate animated bar.
-    script = "#!" .. path.shell .. "\n" .. [[trap 'kill 0; exit 130' INT
+    script = "#!" .. path.shell .. "\nNETFLAGS=" .. path.quote(dl == "curl" and CURL_NET or WGET_NET) .. "\n" .. [[trap 'kill 0; exit 130' INT
 URL="$1"
 LABEL="$2"
 PROG="$3"
@@ -229,7 +242,7 @@ FRAMES="/ - \ |"
 FI=0
 FILL=0
 
-wget -q -O "$TMP" "$URL" &
+wget $NETFLAGS -q -O "$TMP" "$URL" &
 WGET_PID=$!
 
 while kill -0 $WGET_PID 2>/dev/null; do
@@ -356,9 +369,9 @@ function fetch.get(url, dest, label)
     local tmp = dest .. ".part"
     local ok
     if dl == "curl" then
-      ok = path.run("curl -L --fail --show-error -sS -o " .. path.quote(tmp) .. " " .. path.quote(url))
+      ok = path.run("curl -L --fail --show-error -sS " .. CURL_NET .. " -o " .. path.quote(tmp) .. " " .. path.quote(url))
     else
-      local flags = spin and "-q " or ""
+      local flags = (spin and "-q " or "") .. WGET_NET .. " "
       ok = path.run("wget " .. flags .. "-O " .. path.quote(tmp) .. " " .. path.quote(url))
     end
     spinner.stop()
@@ -459,9 +472,9 @@ function fetch.get_parallel(items, opts)
   for _, r in ipairs(remote) do
     local dl_cmd
     if dl == "curl" then
-      dl_cmd = "curl -L --fail --show-error -sS -o " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
+      dl_cmd = "curl -L --fail --show-error -sS " .. CURL_NET .. " -o " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
     else
-      dl_cmd = "wget -q -O " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
+      dl_cmd = "wget " .. WGET_NET .. " -q -O " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
     end
     script_lines[#script_lines + 1] = dl_cmd .. " && echo " .. r.idx .. " >> \"$progress\" || true &"
     script_lines[#script_lines + 1] = "PID_" .. r.idx .. "=$!"
