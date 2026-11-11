@@ -317,16 +317,33 @@ end
 function commit.run_system_ops(opts)
   opts = opts or {}
   local root = opts.root or config.get().root
+  -- Normalized root ("/" for the host, absolute path for a ZETA_ROOT tree)
+  -- and whether we are touching the real system.
+  local r = (root == "") and "/" or root
+  local on_host = (r == "/")
 
   -- Linker cache maintenance only applies to the real system root: an
   -- isolated store never touches the host's ld.so.conf or ld.so.cache (its
   -- binaries resolve libraries through their store RPATHs, with the profile
   -- wrapper's LD_LIBRARY_PATH as fallback).
   if not opts.isolated then
+    -- Ensure the top-level ld.so.conf exists. Packages never ship one, so a
+    -- deployed tree would only have the orphaned snippet below — and ldconfig
+    -- reads ld.so.conf.d exclusively through this file's include directive.
+    local topconf = path.join(r, "etc/ld.so.conf")
+    if not path.exists(topconf) then
+      path.mkdir_p(path.dirname(topconf))
+      local f = io.open(topconf, "w")
+      if f then
+        f:write("include /etc/ld.so.conf.d/*.conf\n")
+        f:close()
+      end
+    end
+
     -- Ensure the dynamic linker knows about /usr/lib and /lib. The default
     -- ld.so.conf only lists /usr/local/lib and /opt/lib; without these paths
     -- ldconfig cannot populate the cache for libraries installed by ZETA.
-    local ldconf = path.join(root, "etc/ld.so.conf.d/00-usr.conf")
+    local ldconf = path.join(r, "etc/ld.so.conf.d/00-usr.conf")
     if not path.exists(ldconf) then
       path.mkdir_p(path.dirname(ldconf))
       local f = io.open(ldconf, "w")
@@ -337,9 +354,14 @@ function commit.run_system_ops(opts)
     end
 
     -- Rebuild the shared library cache so newly installed libraries are found
-    -- at runtime. ldconfig is idempotent and fast.
+    -- at runtime. ldconfig is idempotent and fast. For a non-host root this
+    -- MUST be rooted: plain ldconfig rewrites the *host's* cache and leaves
+    -- the tree with the stale cache shipped inside the glibc payload — inside
+    -- a chroot/bwrap nothing in /lib or /usr/lib then resolves (the runtime
+    -- system search path only covers /lib64 and /usr/lib64).
+    local ldcmd = on_host and "ldconfig" or ("ldconfig -r " .. path.quote(r))
     log.step("Regenerating ldconfig cache")
-    if path.run("ldconfig") then
+    if path.run(ldcmd) then
       log.ok("ld.so.cache updated")
     else
       log.warn("ldconfig failed (non-fatal, but libraries may not be found at runtime)")
@@ -349,26 +371,60 @@ function commit.run_system_ops(opts)
     -- system reaches full icon and menu state without manual steps: only
     -- png/jpeg loaders are builtin to gdk-pixbuf (svg/gif/tiff resolve
     -- through the loaders cache), and desktop/menu association lookups
-    -- read the desktop database. Best-effort, like ldconfig above.
-    log.step("Regenerating gdk-pixbuf loaders cache")
-    if path.run("gdk-pixbuf-query-loaders --update-cache") then
-      log.ok("gdk-pixbuf loaders.cache updated")
-    else
-      log.warn("gdk-pixbuf-query-loaders failed (non-fatal, dynamic loaders may be unreachable)")
-    end
+    -- read the desktop database. Best-effort, like ldconfig above. On a
+    -- non-host root the paths are rooted (gdk-pixbuf runs via chroot so
+    -- the recorded module paths are the tree's own), and steps whose
+    -- inputs are absent from the tree are skipped outright.
+    if on_host then
+      log.step("Regenerating gdk-pixbuf loaders cache")
+      if path.run("gdk-pixbuf-query-loaders --update-cache") then
+        log.ok("gdk-pixbuf loaders.cache updated")
+      else
+        log.warn("gdk-pixbuf-query-loaders failed (non-fatal, dynamic loaders may be unreachable)")
+      end
 
-    log.step("Updating desktop database")
-    if path.run("update-desktop-database /usr/share/applications") then
-      log.ok("desktop database updated")
-    else
-      log.warn("update-desktop-database failed (non-fatal, menu associations may be stale)")
-    end
+      log.step("Updating desktop database")
+      if path.run("update-desktop-database /usr/share/applications") then
+        log.ok("desktop database updated")
+      else
+        log.warn("update-desktop-database failed (non-fatal, menu associations may be stale)")
+      end
 
-    log.step("Updating icon theme caches")
-    if path.run("for d in /usr/share/icons/*/; do if [ -f \"$d/index.theme\" ]; then gtk-update-icon-cache -q -f -t \"$d\" || true; fi; done") then
-      log.ok("icon theme caches updated")
+      log.step("Updating icon theme caches")
+      if path.run("for d in /usr/share/icons/*/; do if [ -f \"$d/index.theme\" ]; then gtk-update-icon-cache -q -f -t \"$d\" || true; fi; done") then
+        log.ok("icon theme caches updated")
+      else
+        log.warn("gtk-update-icon-cache failed (non-fatal)")
+      end
     else
-      log.warn("gtk-update-icon-cache failed (non-fatal)")
+      if path.exists(path.join(r, "usr/bin/gdk-pixbuf-query-loaders")) then
+        log.step("Regenerating gdk-pixbuf loaders cache")
+        if path.run("chroot " .. path.quote(r) .. " /usr/bin/gdk-pixbuf-query-loaders --update-cache") then
+          log.ok("gdk-pixbuf loaders.cache updated")
+        else
+          log.warn("gdk-pixbuf-query-loaders failed (non-fatal, dynamic loaders may be unreachable)")
+        end
+      end
+
+      local appdir = path.join(r, "usr/share/applications")
+      if path.exists(appdir) then
+        log.step("Updating desktop database")
+        if path.run("update-desktop-database " .. path.quote(appdir)) then
+          log.ok("desktop database updated")
+        else
+          log.warn("update-desktop-database failed (non-fatal, menu associations may be stale)")
+        end
+      end
+
+      local iconroot = path.join(r, "usr/share/icons")
+      if path.exists(iconroot) then
+        log.step("Updating icon theme caches")
+        if path.run("for d in " .. path.quote(iconroot) .. "/*/; do if [ -f \"$d/index.theme\" ]; then gtk-update-icon-cache -q -f -t \"$d\" || true; fi; done") then
+          log.ok("icon theme caches updated")
+        else
+          log.warn("gtk-update-icon-cache failed (non-fatal)")
+        end
+      end
     end
   end
 
