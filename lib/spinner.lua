@@ -54,7 +54,6 @@ end
 
 local tty
 local active = false
-local pidfile
 local pid
 local cleared = false
 
@@ -111,13 +110,12 @@ local function launch_script(script)
   if not is_tty() or active then return end
   active = true
   cleared = false
-  pidfile = path.join("/tmp", "zeta-spinner-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999)))
-  path.run(script .. " & echo $! > " .. path.quote(pidfile))
-  local f = io.open(pidfile, "rb")
-  if f then
-    pid = tonumber(f:read("*a")) or nil
-    f:close()
-  end
+  -- spawn_bg hands the loop its own process group, so the cleanup hook takes
+  -- the whole row loop with it instead of orphaning it; it also owns the
+  -- pidfile, which it consumes while reading. The row is a shell fragment, so
+  -- it goes in via `shell -c` rather than being exec'd directly.
+  pid = path.spawn_bg(path.shell .. " -c " .. path.quote(script),
+    path.join("/tmp", "zeta-spinner-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999))))
   path.on_cleanup(spinner._cleanup_hook)
 end
 
@@ -142,14 +140,8 @@ function spinner.stop(keep_row)
   active = false
   cleared = false
   path.remove_cleanup(spinner._cleanup_hook)
-  if pid then
-    path.run("kill " .. tostring(pid) .. " 2>/dev/null")
-    pid = nil
-  end
-  if pidfile then
-    os.remove(pidfile)
-    pidfile = nil
-  end
+  path.kill_tree(pid)
+  pid = nil
   if keep_row then
     raw_write("\n")
   else
@@ -160,14 +152,8 @@ end
 
 -- Internal cleanup hook: kills the spinner process tree on signal.
 function spinner._cleanup_hook()
-  if pid then
-    path.run("kill " .. tostring(pid) .. " 2>/dev/null")
-    pid = nil
-  end
-  if pidfile then
-    os.remove(pidfile)
-    pidfile = nil
-  end
+  path.kill_tree(pid)
+  pid = nil
 end
 
 return spinner

@@ -472,7 +472,6 @@ local quotes = {
   	":)",
   	"Astonishing!",
   	"Unbelivable!",
-    "tree.",
    },
 
   success = {

@@ -14,6 +14,50 @@ local config = require("config")
 
 local downloader
 
+-- Network flags appended to every curl/wget invocation.
+--
+-- ZETA used to pass none, so a stalled transfer waited out wget's default
+-- 900-second read timeout and its default 20 retries -- the reports of
+-- waiting 20 minutes for a single tarball. There is deliberately no
+-- --max-time: a global cap would punish exactly the slow links these users
+-- have, so every guard below is per-condition instead.
+--
+-- --speed-limit/--speed-time abort a transfer that stops delivering for 30s.
+-- The threshold is 10 KB/s rather than the 1 byte/s this guard originally
+-- shipped with, so a link crawling at a trickle gives up and retries instead
+-- of hanging -- a deliberate choice, taken knowing that a link sustained
+-- below 10 KB/s will be aborted and retried into failure.
+--
+-- `--retry` deliberately omits `--retry-all-errors` so a plain 404 still
+-- fails immediately instead of being retried three times on the way to
+-- "package not found".
+local CURL_FLAGS = "--connect-timeout 10 --retry 3 --retry-delay 1 "
+  .. "--retry-max-time 60 --speed-limit 10240 --speed-time 30"
+local WGET_FLAGS = "--timeout=15 --tries=3 --waitretry=1 "
+  .. "--speed-limit=10240 --speed-time=30"
+
+-- Resume only when a partial file is already on disk: a fresh download must
+-- not send a Range header, because a server without byte-range support would
+-- fail the request outright. `style` is the flag for the downloader in use.
+-- io.open + seek, so no fork.
+local function resume_flag(pathname, style)
+  local f = io.open(pathname, "rb")
+  if not f then return "" end
+  local sz = f:seek("end")
+  f:close()
+  if not sz or sz == 0 then return "" end
+  return style
+end
+
+-- Only payloads in the cache are worth resuming: they are the 800 MB ones and
+-- they are sha256-verified right after the download. Manifests and indexes
+-- live in tmp_dir, change between runs, and carry no checksum -- stitching two
+-- versions together from a stale partial is worse than re-fetching 1 KB.
+local function resumable(dest)
+  local cache = config.get().cache_dir
+  return cache ~= nil and cache ~= "" and dest:sub(1, #cache) == cache
+end
+
 local quotes = require("quotes")
 
 -- GitHub serves raw file bytes from raw.githubusercontent.com, not from
@@ -50,10 +94,15 @@ local function have(cmd)
   return out ~= nil and out ~= ""
 end
 
+-- The downloader's *name* only. Consumers branch on `dl == "curl"`, so this
+-- must stay a bare name: commit 2f5ddf2 changed it to "curl --silent" to quiet
+-- the output and silently made every curl branch dead code -- ZETA fell
+-- through to wget (and failed outright on a curl-only host). The commands
+-- below carry their own -sS/-q already.
 function fetch.downloader()
   if not downloader then
     if have("curl") then
-      downloader = "curl --silent"
+      downloader = "curl"
     elseif have("wget") then
       downloader = "wget"
     else
@@ -62,19 +111,6 @@ function fetch.downloader()
   end
   return downloader or nil
 end
-
--- Network flags appended to every curl/wget invocation.
---
--- ZETA used to pass none, so a stalled transfer waited out wget's default
--- 900-second read timeout and its default 20 retries -- the reports of
--- waiting 20 minutes for a single tarball. Both stall guards only fire when
--- NO data arrives at all, so a slow-but-progressing download is never
--- killed. There is deliberately no --max-time: a global cap would punish
--- exactly the slow links these users have. curl gets 3 attempts via
--- --retry 2 with a fixed 5s delay; wget's -t 3 gives 3 tries with its
--- built-in 1..5s linear backoff (it has no fixed-interval option).
-local CURL_NET = "--connect-timeout 15 --speed-limit 1 --speed-time 15 --retry 2 --retry-delay 5"
-local WGET_NET = "--connect-timeout=15 --read-timeout=15 -t 3 --waitretry=5"
 
 -- Copy a file, creating parent directories. Used for file:// and local urls.
 function fetch.copy(src, dest)
@@ -116,6 +152,18 @@ end
 -- Finalize the progress bar line (move to next line, keeping the bar).
 local function clear_bar()
   io.write("\n")
+  io.flush()
+end
+
+-- One batch progress line: `[=====----- /] name  done/total`. Shared by the
+-- parallel batch and the streaming prefetch so both read identically.
+local function draw_batch(done, total, last_name)
+  local pct = math.floor(100 * done / math.max(total, 1))
+  local filled = math.floor(BAR_WIDTH * math.min(pct, 100) / 100)
+  local empty = BAR_WIDTH - filled
+  spin_idx = (spin_idx % #SPIN_FRAMES) + 1
+  io.write(("\r\27[K  [" .. string.rep("=", filled) .. "%s" .. string.rep(" ", empty)
+    .. "] %s  %d/%d"):format(SPIN_FRAMES[spin_idx], last_name, done, total))
   io.flush()
 end
 
@@ -165,9 +213,16 @@ function fetch.get_with_progress(url, dest, label)
   local tmp = dest .. ".part"
   path.mkdir_p(path.dirname(dest))
 
+  -- Same resume rule as fetch.get: only a payload sitting in the cache is
+  -- continued, and only when bytes of it are already on disk.
+  local resume = resumable(dest) and resume_flag(tmp, "-C - ") or ""
+
   local script
   if dl == "curl" then
-    script = "#!" .. path.shell .. "\nNETFLAGS=" .. path.quote(dl == "curl" and CURL_NET or WGET_NET) .. "\n" .. [[trap 'kill 0; exit 130' INT
+    script = "#!" .. path.shell .. "\n"
+      .. "FLAGS=" .. path.quote(CURL_FLAGS) .. "\n"
+      .. "RESUME=" .. path.quote(resume) .. "\n"
+      .. [[trap 'kill 0; exit 130' INT
 URL="$1"
 LABEL="$2"
 PROG="$3"
@@ -187,7 +242,7 @@ BAR_WIDTH=35
 FRAMES="/ - \ |"
 FI=0
 
-curl -L --fail --show-error $NETFLAGS -o "$TMP" "$URL" 2>"$PROG" &
+curl -L --fail --show-error $FLAGS $RESUME -o "$TMP" "$URL" 2>"$PROG" &
 CURL_PID=$!
 
 while kill -0 $CURL_PID 2>/dev/null; do
@@ -230,8 +285,11 @@ wait $CURL_PID
 echo $? > "]]  .. dest .. ".rc" .. [["
 ]]
   else
-    -- wget: suppress output, show indeterminate animated bar.
-    script = "#!" .. path.shell .. "\nNETFLAGS=" .. path.quote(dl == "curl" and CURL_NET or WGET_NET) .. "\n" .. [[trap 'kill 0; exit 130' INT
+    -- wget: suppress output, show indeterminate animated bar. No resume here:
+    -- wget's continue flag is not reliable together with -O.
+    script = "#!" .. path.shell .. "\n"
+      .. "FLAGS=" .. path.quote(WGET_FLAGS) .. "\n"
+      .. [[trap 'kill 0; exit 130' INT
 URL="$1"
 LABEL="$2"
 PROG="$3"
@@ -242,7 +300,7 @@ FRAMES="/ - \ |"
 FI=0
 FILL=0
 
-wget $NETFLAGS -q -O "$TMP" "$URL" &
+wget -q $FLAGS -O "$TMP" "$URL" &
 WGET_PID=$!
 
 while kill -0 $WGET_PID 2>/dev/null; do
@@ -267,10 +325,11 @@ echo $? > "]]  .. dest .. ".rc" .. [["
   if not sf then return nil, "cannot create progress script" end
   sf:write(script)
   sf:close()
-  os.execute("chmod +x " .. path.quote(script_file))
 
-  -- Run the script: $1=URL $2=LABEL $3=progress_file $4=tmp $5=downloader
-  local cmd = path.quote(script_file) .. " "
+  -- Run it through the shell rather than chmod +x + execute: one fork fewer
+  -- per download, and no dependency on the script's exec bit.
+  -- $1=URL $2=LABEL $3=progress_file $4=tmp $5=downloader
+  local cmd = path.shell .. " " .. path.quote(script_file) .. " "
     .. path.quote(url) .. " "
     .. path.quote(label or "") .. " "
     .. path.quote(progress_file) .. " "
@@ -283,37 +342,31 @@ echo $? > "]]  .. dest .. ".rc" .. [["
     render_bar(0, label)
   end
 
-  -- Launch the script in the background (same pattern as get_parallel) so
-  -- Lua can tick slow-download quotes while the script's shell loop keeps
-  -- drawing the bar.
-  local pid_file = dest .. ".pid"
-  os.execute(cmd .. " & echo $! > " .. path.quote(pid_file))
-  local pid
-  local pf = io.open(pid_file, "r")
-  if pf then
-    pid = pf:read("*l")
-    pf:close()
-  end
-  os.remove(pid_file)
+  -- Detached background job: Lua ticks slow-download quotes while the
+  -- script's own shell loop draws the bar, and cleanup can kill the whole
+  -- tree on Ctrl+C (see path.spawn_bg).
+  local pid = path.spawn_bg(cmd, dest .. ".pid")
 
-  -- Register cleanup so Ctrl+C kills the background download script.
   local function progress_cleanup()
-    if pid then
-      path.run("kill " .. tostring(pid) .. " 2>/dev/null")
-      pid = nil
-    end
+    path.kill_tree(pid)
+    pid = nil
+    os.remove(script_file)
+    os.remove(progress_file)
+    os.remove(dest .. ".rc")
   end
   path.on_cleanup(progress_cleanup)
 
   local slow_tick = make_slow_ticker(SLOW_AFTER, SLOW_EVERY,
     use_tty and quotes.is_enabled(), quotes.slowdownload)
-  while pid and path.run("kill -0 " .. pid .. " 2>/dev/null") do
+  -- path.alive/path.sleep instead of path.run(os.execute): system(3) blocks
+  -- SIGINT, which is exactly where Ctrl+C used to be swallowed.
+  while pid and path.alive(pid) do
     local q = slow_tick()
     if q then
       io.write("\n")
       log.detail(q)
     end
-    os.execute("sleep 0.5")
+    path.sleep(0.1)
   end
   path.remove_cleanup(progress_cleanup)
 
@@ -367,21 +420,31 @@ function fetch.get(url, dest, label)
       log.step(("downloading %s"):format(url))
     end
     local tmp = dest .. ".part"
+    -- run_interruptible, not path.run: system(3) blocks SIGINT for the whole
+    -- call, which is why Ctrl+C did nothing during a download.
+    local keep = resumable(dest)
     local ok
     if dl == "curl" then
-      ok = path.run("curl -L --fail --show-error -sS " .. CURL_NET .. " -o " .. path.quote(tmp) .. " " .. path.quote(url))
+      ok = path.run_interruptible("curl -L --fail --show-error -sS " .. CURL_FLAGS .. " "
+        .. (keep and resume_flag(tmp, "-C - ") or "")
+        .. "-o " .. path.quote(tmp) .. " " .. path.quote(url))
     else
-      local flags = (spin and "-q " or "") .. WGET_NET .. " "
-      ok = path.run("wget " .. flags .. "-O " .. path.quote(tmp) .. " " .. path.quote(url))
+      -- wget's -c is unreliable together with -O, so curl carries the resume
+      -- and wget only gets the bounds.
+      local flags = spin and "-q " or ""
+      ok = path.run_interruptible("wget " .. flags .. WGET_FLAGS .. " "
+        .. "-O " .. path.quote(tmp) .. " " .. path.quote(url))
     end
     spinner.stop()
     if not ok then
-      os.remove(tmp)
+      -- A resumable partial is deliberately left behind: that is what the next
+      -- attempt continues from. Anything else is discarded as before.
+      if not keep then os.remove(tmp) end
       return nil, ("download failed: %s"):format(url)
     end
     local r, e = os.rename(tmp, dest)
     if not r then
-      os.remove(tmp)
+      if not keep then os.remove(tmp) end
       return nil, e
     end
     return dest
@@ -395,7 +458,10 @@ end
 -- contents. The temporary file is removed before returning.
 function fetch.read(url, label)
   local name = url:match("[^/]+$") or "zeta"
-  local tmp = path.join("/tmp", "zeta-" .. name .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999)))
+  -- config.tmp_dir, not a hardcoded /tmp: ZETA_TMP deserves to be honoured and
+  -- the directory is already resolved to one this user can actually write.
+  local tmp = path.join(config.get().tmp_dir,
+    "read-" .. name .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999)))
   local dest, err = fetch.get(url, tmp, label)
   if not dest then return nil, err end
   local f = io.open(dest, "rb")
@@ -441,7 +507,10 @@ function fetch.get_parallel(items, opts)
       local ok, err = fetch.copy(src, dest)
       results[i] = ok and { dest = dest } or { err = err }
     else
-      local tmp = dest .. tmp_suffix
+      -- A cached payload gets a stable .part name so an interrupted 800 MB
+      -- transfer can be resumed; anything else keeps a per-run name, so a
+      -- stale partial can never be stitched into a manifest that changed.
+      local tmp = resumable(dest) and (dest .. ".part") or (dest .. tmp_suffix)
       remote[#remote + 1] = { url = url, dest = dest, tmp = tmp, idx = i, label = item.label }
       results[i] = { pending = true }
     end
@@ -452,14 +521,24 @@ function fetch.get_parallel(items, opts)
   end
 
   local progress_file = "/tmp/zeta-progress-" .. tmp_suffix
+  local done_file = "/tmp/zeta-done-" .. tmp_suffix
   local rc_file = "/tmp/zeta-rc-" .. tmp_suffix
+
+  -- Bounded fan-out. A huge transaction used to fork every curl/wget of the
+  -- batch at once -- on -Transcend that is one process, socket and stalled
+  -- connection per installed package, and the peak is exactly where a big
+  -- run used to fall over. ZETA_FETCH_JOBS overrides the default.
+  local max_jobs = tonumber(os.getenv("ZETA_FETCH_JOBS") or "") or 8
 
   local script_lines = {
     "#!" .. path.shell,
     "trap 'kill 0; exit 130' INT",
     "fail=0",
     "progress=" .. path.quote(progress_file),
+    "done=" .. path.quote(done_file),
     "> \"$progress\"",
+    "> \"$done\"",
+    "launched=0",
   }
 
   -- Verbose: show all download URLs before starting.
@@ -472,12 +551,27 @@ function fetch.get_parallel(items, opts)
   for _, r in ipairs(remote) do
     local dl_cmd
     if dl == "curl" then
-      dl_cmd = "curl -L --fail --show-error -sS " .. CURL_NET .. " -o " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
+      dl_cmd = "curl -L --fail --show-error -sS " .. CURL_FLAGS .. " "
+        .. resume_flag(r.tmp, "-C - ")
+        .. "-o " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
     else
-      dl_cmd = "wget " .. WGET_NET .. " -q -O " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
+      -- No -c here: wget's continue flag is not reliable with -O, so only
+      -- curl resumes. wget still gets the timeout/retry/stall bounds.
+      dl_cmd = "wget -q " .. WGET_FLAGS .. " -O " .. path.quote(r.tmp) .. " " .. path.quote(r.url)
     end
-    script_lines[#script_lines + 1] = dl_cmd .. " && echo " .. r.idx .. " >> \"$progress\" || true &"
+    -- Slot gate: wait while `max_jobs` transfers are still in flight. The
+    -- done file gets a line per transfer whether it succeeded or not, so a
+    -- failed download can never stall the count (progress, which records
+    -- successes only, would have).
+    script_lines[#script_lines + 1] = "while [ $(( launched - $(wc -l < \"$done\") )) -ge "
+      .. max_jobs .. " ]; do sleep 0.1; done"
+    -- The done-append sits inside the same subshell as the transfer so it
+    -- always runs; progress stays success-only (results are decided from
+    -- it below).
+    script_lines[#script_lines + 1] = "( " .. dl_cmd .. " && echo " .. r.idx
+      .. " >> \"$progress\"; echo . >> \"$done\" ) &"
     script_lines[#script_lines + 1] = "PID_" .. r.idx .. "=$!"
+    script_lines[#script_lines + 1] = "launched=$((launched + 1))"
   end
   for _, r in ipairs(remote) do
     script_lines[#script_lines + 1] = "wait $PID_" .. r.idx .. " || fail=1"
@@ -495,29 +589,20 @@ function fetch.get_parallel(items, opts)
   end
   sf:write(table.concat(script_lines, "\n") .. "\n")
   sf:close()
-  os.execute("chmod +x " .. path.quote(script_path))
+  -- Run it through the shell rather than chmod +x + execute: one fork fewer
+  -- per batch, and no dependency on the script's exec bit.
+  local run_cmd = path.shell .. " " .. path.quote(script_path)
 
-  -- Launch script in background
-  local pid_file = "/tmp/zeta-pid-" .. tmp_suffix
-  os.execute(path.quote(script_path) .. " & echo $! > " .. path.quote(pid_file))
-
-  -- Read the PID
-  local pid = nil
-  local pf = io.open(pid_file, "r")
-  if pf then
-    pid = pf:read("*l")
-    pf:close()
+  -- Registered on both paths: an interrupted run must not strand the
+  -- script/progress/rc files in /tmp. Killing the job tree is the tty path's
+  -- job -- the synchronous path gets that from run_interruptible's own hook.
+  local scratch_cleanup = function()
+    os.remove(script_path)
+    os.remove(progress_file)
+    os.remove(done_file)
+    os.remove(rc_file)
   end
-  os.remove(pid_file)
-
-  -- Register cleanup so Ctrl+C kills the background download script.
-  local function parallel_cleanup()
-    if pid then
-      path.run("kill " .. tostring(pid) .. " 2>/dev/null")
-      pid = nil
-    end
-  end
-  path.on_cleanup(parallel_cleanup)
+  path.on_cleanup(scratch_cleanup)
 
   -- Progress display
   local completed = 0
@@ -525,17 +610,34 @@ function fetch.get_parallel(items, opts)
   local use_spinner = spinner.enabled()
   local seen = {}
   local last_name = ""
+  local pid, parallel_cleanup
 
-  -- Print the header line once.
   if use_spinner then
+    pid = path.spawn_bg(run_cmd, "/tmp/zeta-pid" .. tmp_suffix)
+
+    -- Ctrl+C has to take the download *and* everything it spawned with it.
+    parallel_cleanup = function()
+      path.kill_tree(pid)
+      pid = nil
+    end
+    path.on_cleanup(parallel_cleanup)
+
+    -- Print the header line once.
     io.write("  " .. progress_label:format(total) .. "...\n")
     io.flush()
+  else
+    -- Nothing to draw, so no background job and no polling loop: one blocking
+    -- wait instead of a `kill -0` + `sleep` pair forked twice per tick, and no
+    -- up-to-100ms tail latency on every batch.
+    path.run_interruptible(run_cmd)
   end
 
   local slow_tick = make_slow_ticker(SLOW_AFTER, SLOW_EVERY,
     use_spinner and quotes.is_enabled(), quotes.slowdownload)
 
-  while pid and path.run("kill -0 " .. pid .. " 2>/dev/null") do
+  -- path.alive/path.sleep instead of path.run(os.execute): system(3) blocks
+  -- SIGINT, which is exactly where Ctrl+C used to be swallowed.
+  while pid and path.alive(pid) do
     -- Count completed downloads and find the newest completion.
     local f = io.open(progress_file, "r")
     if f then
@@ -555,13 +657,7 @@ function fetch.get_parallel(items, opts)
     end
 
     if use_spinner then
-      local pct = math.floor(100 * completed / total)
-      local filled = math.floor(BAR_WIDTH * pct / 100)
-      local empty = BAR_WIDTH - filled
-      spin_idx = (spin_idx % #SPIN_FRAMES) + 1
-      local spinner_char = SPIN_FRAMES[spin_idx]
-      io.write(("\r\27[K  [" .. string.rep("=", filled) .. "%s" .. string.rep(" ", empty) .. "] %s  %d/%d"):format(spinner_char, last_name, completed, total))
-      io.flush()
+      draw_batch(completed, total, last_name)
     end
     -- Slow-download taunt: leave the progress line, quote above it; the next
     -- tick redraws the bar on the line below.
@@ -570,10 +666,11 @@ function fetch.get_parallel(items, opts)
       io.write("\n")
       log.detail(q)
     end
-    os.execute("sleep 0.1")
+    path.sleep(0.05)
   end
 
-  path.remove_cleanup(parallel_cleanup)
+  if parallel_cleanup then path.remove_cleanup(parallel_cleanup) end
+  path.remove_cleanup(scratch_cleanup)
 
   -- Final count.
   local f = io.open(progress_file, "r")
@@ -599,32 +696,29 @@ function fetch.get_parallel(items, opts)
     log.step(progress_label:format(total) .. "... [" .. completed .. "/" .. total .. "]")
   end
 
-  -- Read exit code
-  local ok = true
-  local rf = io.open(rc_file, "r")
-  if rf then
-    local rc = tonumber(rf:read("*a")) or 1
-    rf:close()
-    ok = (rc == 0)
-  end
-
   -- Cleanup
   os.remove(script_path)
   os.remove(progress_file)
+  os.remove(done_file)
   os.remove(rc_file)
 
+  -- Decide per item from the script's own completion file: it records a
+  -- transfer only when that transfer exited 0. So a file that succeeded is
+  -- kept even when a sibling failed, an interrupted payload keeps its partial
+  -- on disk for the next run to resume, and only a transfer that never
+  -- completed is reported as an error.
   for _, r in ipairs(remote) do
-    if not ok then
-      os.remove(r.tmp)
-      results[r.idx] = { err = ("download failed: %s"):format(r.url) }
-    else
+    if seen[r.idx] then
       local renamed, ren_err = os.rename(r.tmp, r.dest)
       if renamed then
         results[r.idx] = { dest = r.dest }
       else
-        os.remove(r.tmp)
-        results[r.idx] = { err = ren_err }
+        if not resumable(r.dest) then os.remove(r.tmp) end
+        results[r.idx] = { err = ren_err or ("could not store download: %s"):format(r.url) }
       end
+    else
+      if not resumable(r.dest) then os.remove(r.tmp) end
+      results[r.idx] = { err = ("download failed: %s"):format(r.url) }
     end
   end
 

@@ -310,6 +310,38 @@ local function begin_extract_row(noun, total)
 	return draw, finish
 end
 
+-- Space preflight before the extract phase. Every payload is unpacked into
+-- tmp_dir up front, and on HaliadeSYS that directory sits on a tmpfs -- a
+-- set that cannot fit there dies halfway through extraction instead of
+-- failing up front with a hint. Warn only: payloads can shrink on extract
+-- (xz/gz), and the remedy is one environment variable away.
+local function warn_stage_fit(payloads)
+	local total = 0
+	for _, p in ipairs(payloads) do
+		local f = io.open(p, "rb")
+		if f then
+			total = total + (f:seek("end") or 0)
+			f:close()
+		end
+	end
+	if total == 0 then return end
+	local tmp = config.get().tmp_dir
+	local df = path.popen("df -Pk " .. path.quote(tmp) .. " 2>/dev/null")
+	local avail_kb
+	if df then
+		for line in df:lines() do
+			local _, _, avail = line:match("%s(%d+)%s+(%d+)%s+(%d+)%s+%d+%%")
+			if avail then avail_kb = tonumber(avail) end
+		end
+		df:close()
+	end
+	if not avail_kb then return end
+	if total > avail_kb * 1024 * 0.8 then
+		log.warn(("payloads total ~%d MB but only %d MB is free in %s -- extraction may run out of space (set ZETA_TMP to a disk-backed directory if this is a tmpfs)"):format(
+			math.floor(total / 1048576), math.floor(avail_kb / 1024), tmp))
+	end
+end
+
 -- Shared install flow for -Provide / -LocalProvide / -ReProvide / -Solve.
 -- flags.isolate: install into a self-contained store under the reserve dir
 -- (package + full dependency closure), exposed through the profile bin dir.
@@ -610,6 +642,13 @@ function actions._install(name, flags, opts)
 		log.error(tostring(verr))
 		return 1
 	end
+	warn_stage_fit((function()
+		local ps = {}
+		for _, it in ipairs(verify_items) do
+			if it.payload then ps[#ps + 1] = it.payload end
+		end
+		return ps
+	end)())
 	profile.mark("extract")
 
 	-- A store is self-contained: nothing outside references its internals
@@ -1579,6 +1618,13 @@ function actions.transcend(flags)
 		log.error(tostring(verr))
 		return 1
 	end
+	warn_stage_fit((function()
+		local ps = {}
+		for _, it in ipairs(verify_items) do
+			if it.payload then ps[#ps + 1] = it.payload end
+		end
+		return ps
+	end)())
 	profile.mark("extract")
 
 	-- Phase 4: Extract and build every upgrade into its staging tree. Nothing

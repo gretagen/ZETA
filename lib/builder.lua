@@ -317,6 +317,37 @@ function builder.verify_all(items)
   log.ok("sha256 instances verified")
 end
 
+-- gc_tmp() -- sweep temp trees a hard-killed run left behind.
+--
+-- An ordinary failure and Ctrl+C both discard their own staging/work/commit
+-- trees (discard_staged / commit_all's closing rm, plus the exit cleanup
+-- hooks); only SIGKILL, OOM-kill or power loss strands them. Leftovers
+-- accumulate towards ENOSPC on a huge system -- staging holds a full copy
+-- of every payload until the commit starts. Age-based (-mmin +360) so a
+-- second zeta running at the same time is never touched: nothing
+-- legitimate is more than a few hours old. Runs once per process, from
+-- stage_one, i.e. before any commit worker exists.
+local gc_done = false
+function builder.gc_tmp()
+  if gc_done then return end
+  gc_done = true
+  local cfg = config.get()
+  local tmp = cfg.tmp_dir
+  if not tmp or tmp == "" then return end
+  -- Per-package staging/work trees, then the batch commit dirs and bulk
+  -- shadow trees inside tmp_dir, then a root-level shadow from a run whose
+  -- tmp_dir was on another filesystem. A missing start dir just makes find
+  -- complain into /dev/null -- the other sweeps still run.
+  path.run("find " .. path.quote(path.join(tmp, "staging")) .. " "
+    .. path.quote(path.join(tmp, "work")) .. " -mindepth 1 -maxdepth 1 "
+    .. "-mmin +360 -exec rm -rf {} + 2>/dev/null")
+  path.run("find " .. path.quote(tmp) .. " -maxdepth 1 "
+    .. "\\( -name 'commit-*' -o -name 'shadow-*' \\) -mmin +360 "
+    .. "-exec rm -rf {} + 2>/dev/null")
+  path.run("find " .. path.quote(cfg.root) .. " -maxdepth 1 "
+    .. "-name '.zeta-commit-*' -mmin +360 -exec rm -rf {} + 2>/dev/null")
+end
+
 -- stage_one(manifest, opts) -> staged
 --
 -- Extract (or build) one package into a fresh staging tree and return the
@@ -329,6 +360,7 @@ end
 -- Without a payload the payload is obtained (and verified) here.
 function builder.stage_one(manifest, opts)
   opts = opts or {}
+  builder.gc_tmp()
   local cfg = config.get()
   local name = manifest.name
 

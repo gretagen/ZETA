@@ -96,31 +96,27 @@ local function collect_owned(staging, whitelist)
   -- entries that are prefixes of other entries: if a package owns usr/bin/hello,
   -- we don't record usr/ or usr/bin/ -- delete_files collects parents dynamically.
   -- This prevents deletion from ever attempting to rmdir system directories.
-  local non_dir = {}
-  local dir_set = {}
-  for _, e in ipairs(entries) do
-    if e.type == "dir" then
-      dir_set[e.rel] = true
-    else
-      non_dir[#non_dir + 1] = e
-    end
-  end
-  -- Keep only directories that are NOT prefixes of any file/symlink entry.
-  local owned = {}
+  --
+  -- A directory is "dominated" exactly when some non-dir entry has it as a
+  -- strict ancestor, so marking every ancestor of every non-dir entry gives
+  -- the same set as the old dirs x files prefix scan -- in O(total path
+  -- components) instead. The scan went quadratic on huge packages (10k dirs
+  -- x 100k files is 1e9 string compares, and it runs once per package in
+  -- the counting phase before the first file moves).
+  local dominated = {}
   for _, e in ipairs(entries) do
     if e.type ~= "dir" then
+      local parent = e.rel:match("^(.*)/[^/]+$")
+      while parent and parent ~= "" do
+        dominated[parent] = true
+        parent = parent:match("^(.*)/[^/]+$")
+      end
+    end
+  end
+  local owned = {}
+  for _, e in ipairs(entries) do
+    if e.type ~= "dir" or not dominated[e.rel] then
       owned[#owned + 1] = e
-    else
-      local dominated = false
-      for _, nd in ipairs(non_dir) do
-        if nd.rel:sub(1, #e.rel + 1) == e.rel .. "/" then
-          dominated = true
-          break
-        end
-      end
-      if not dominated then
-        owned[#owned + 1] = e
-      end
     end
   end
 
@@ -187,14 +183,27 @@ function commit.apply(staging, opts)
   -- instead: mkdir -p refuses to follow a dangling symlink. Targets are
   -- relative by construction (symlink_escapes rejects absolute ones), so
   -- resolving against the parent is safe.
+  -- Creating a directory costs two forks (readlink + mkdir -p) and the commit
+  -- used to pay that for every one of ~1500 entries. io.open answers "already
+  -- a usable directory" with no fork at all, and the result is memoised, so a
+  -- package now pays roughly one pair per distinct parent instead of per file.
+  local made_dirs = {}
+
   local function ensure_dir(d)
+    if made_dirs[d] then return end
+    local probe = io.open(d, "rb")
+    if probe then
+      probe:close()
+      made_dirs[d] = true
+      return
+    end
     local target = path.readlink(d)
-    if target then
-      d = path.join(path.dirname(d), target)
+    local goal = target and path.join(path.dirname(d), target) or d
+    if not path.mkdir_p(goal) then
+      error(("failed to create directory %q"):format(goal), 0)
     end
-    if not path.mkdir_p(d) then
-      error(("failed to create directory %q"):format(d), 0)
-    end
+    made_dirs[d] = true
+    made_dirs[goal] = true
   end
 
   -- Copy phase. Non-verbose TTY mode shows a live updating progress line
@@ -208,53 +217,18 @@ function commit.apply(staging, opts)
   local done = 0
   local file_count, sym_count, dir_count = 0, 0, 0
 
-  for _, e in ipairs(owned) do
-    local dest = path.join(root, e.rel)
-    local src = path.join(staging, e.rel)
-    if e.type == "dir" then
-      ensure_dir(dest)
-      dir_count = dir_count + 1
-    else
-      ensure_dir(path.dirname(dest))
-      if e.type == "symlink" then
-        -- uutils-coreutils ln (0.13, the GNU coreutils replacement) cannot
-        -- `-f`-replace an existing destination whose parent is a symlinked
-        -- directory: it reports ENOTDIR from the parent resolution instead of
-        -- unlinking (e.g. replacing a plain file with `ctstat -> lnstat` under
-        -- /sbin -> usr/sbin). Delete the old entry explicitly first so ln only
-        -- ever creates a fresh link; harmless with GNU ln too.
-        path.run("rm -f " .. path.quote(dest))
-        if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(dest)) then
-          error(("failed to create symlink %q"):format(dest), 0)
-        end
-        sym_count = sym_count + 1
-      else
-        local tmp = dest .. ".zeta-tmp-" .. tostring(math.random(100000, 999999))
-        if not path.run("cp -a " .. path.quote(src) .. " " .. path.quote(tmp)) then
-          os.remove(tmp)
-          error(("failed to install %q"):format(e.rel), 0)
-        end
-        if not path.run("mv -f " .. path.quote(tmp) .. " " .. path.quote(dest)) then
-          os.remove(tmp)
-          error(("failed to install %q"):format(e.rel), 0)
-        end
-        file_count = file_count + 1
-      end
-    end
-
-    -- Progress: the caller's counter (batch mode) or a live TTY line.
+  -- Report one finished entry: the live counter first, then the verbose line.
+  local function emit(e, src, dest)
     done = done + 1
     if opts.on_progress then
       opts.on_progress(done, total, e.rel)
     elseif use_tty and not verbose and total > 0 then
       local n = paint("blue", tostring(done))
       local tot = paint("cyan", tostring(total))
-      local p = paint("dim", path.join(root, e.rel))
-      io.write(("\r\27[K%s - [ provided %s | %s entries ] %s"):format(spinner.next_frame(), n, tot, p))
+      io.write(("\r\27[K%s - [ provided %s | %s entries ] %s"):format(
+        spinner.next_frame(), n, tot, paint("dim", path.join(root, e.rel))))
       io.flush()
     end
-
-    -- Verbose: detailed per-file output.
     if verbose then
       if e.type == "dir" then
         log.detail(("  mkdir %s"):format(dest))
@@ -265,6 +239,270 @@ function commit.apply(staging, opts)
       end
     end
   end
+
+  -- Capability probes for the placement helpers below. Probed once per
+  -- process, like bulk_supported(): `mv --help` text decides which swap
+  -- primitives exist (GNU and uutils both advertise both flags today, but
+  -- a stripped mv must degrade to the legacy path, not to a wrong one).
+  local mv_flags
+  local function have_mv(flag)
+    if mv_flags == nil then
+      local f = path.popen("mv --help 2>/dev/null")
+      local txt = f and f:read("*a") or ""
+      if f then f:close() end
+      mv_flags = {
+        T = txt:find("--no-target-directory", 1, true) ~= nil,
+        t = txt:find("--target-directory", 1, true) ~= nil,
+      }
+    end
+    return mv_flags[flag]
+  end
+
+  -- Filesystem device id of an existing directory (-L so a symlinked dir
+  -- reports the filesystem it points at, matching how a rename through it
+  -- resolves). nil when unprovable: callers then use the per-entry path,
+  -- which is atomic by construction because its temp file lives in the
+  -- destination's own directory.
+  local dev_cache = {}
+  local function device_of(dir)
+    local d = dev_cache[dir]
+    if d == nil then
+      local f = path.popen("stat -Lc %d " .. path.quote(dir) .. " 2>/dev/null")
+      local out = f and f:read("*l") or ""
+      if f then f:close() end
+      d = tonumber(out) or false
+      dev_cache[dir] = d
+    end
+    if d then return d end
+    return nil
+  end
+
+  -- The shadow tree bulk chunks are copied into before they are swapped
+  -- onto the live path. The direct alternative -- `cp --parents` straight
+  -- onto the final paths -- opens every existing destination O_TRUNC and
+  -- follows destination symlinks, which rewrites shared libraries that
+  -- running daemons have mmap'd: page cache mutates under them and
+  -- bluetoothd/pipewire/connmand segfault mid-transaction (dmesg: bursts of
+  -- identical garbage instruction addresses right after a huge commit).
+  -- Shadow + rename() keeps the batch speed AND the guarantee the old
+  -- per-entry `cp tmp && mv` had: the old inode stays valid for every
+  -- reader until the instant it is replaced.
+  local shadow, shadow_dev, shadow_tried
+  local function pick_shadow()
+    if shadow_tried then return shadow end
+    shadow_tried = true
+    local root_dev = device_of(root)
+    if not root_dev then return nil end
+    local stamp = table.concat({
+      tostring(os.time()), tostring(math.random(1000, 9999)),
+      -- Concurrent commit workers start from the same unseeded RNG, so the
+      -- package name keeps two shadows launched in the same second apart
+      -- (a worker never handles one package twice at once).
+      tostring(opts.pkg_name or "pkg"),
+    }, "-")
+    -- Preferred: the configured tmp dir, when it shares the install root's
+    -- filesystem (on HaliadeSYS /var/tmp is a tmpfs, so it does not, and
+    -- the fallback below is taken instead).
+    local tmp = config.get().tmp_dir
+    if tmp and tmp ~= "" then
+      path.mkdir_p(tmp)
+      local cand = path.join(tmp, "shadow-" .. stamp)
+      if path.mkdir_p(cand) and device_of(cand) == root_dev then
+        shadow, shadow_dev = cand, root_dev
+        return shadow
+      end
+      path.run("rm -rf " .. path.quote(cand))
+    end
+    -- Fallback: a dot-directory directly inside the install root, which by
+    -- construction sits on the root's own filesystem. Swept by gc on the
+    -- next run (builder.gc_tmp) if this process is ever SIGKILLed first.
+    local cand = path.join(root, ".zeta-commit-" .. stamp)
+    if path.mkdir_p(cand) and device_of(cand) == root_dev then
+      shadow, shadow_dev = cand, root_dev
+    else
+      path.run("rm -rf " .. path.quote(cand))
+      shadow = false -- unprovable -> bulk disabled, place_one everywhere
+    end
+    return shadow
+  end
+
+  -- One entry at a time, kept as the fallback: slow (four processes per entry
+  -- counting the shells) but it works wherever `cp --parents` does not, and it
+  -- reports a real per-entry error instead of a silent miss. Its temp file
+  -- lives in the destination's own directory, so the final mv is always a
+  -- same-filesystem rename -- atomic whether or not the shadow path applies.
+  local function place_one(e, src, dest)
+    ensure_dir(path.dirname(dest))
+    if e.type == "symlink" then
+      -- Swap through a private name + rename(): `mv -T` replaces a
+      -- destination symlink *itself* instead of following it into a
+      -- symlinked directory, and rename() never exposes a moment where the
+      -- path is missing -- a service restarting in that window used to fail
+      -- its start and stay down. Creating the temp link fresh also sidesteps
+      -- uutils-coreutils ln 0.13's ENOTDIR when -f-replacing an entry under
+      -- a symlinked parent (/sbin -> usr/sbin): ln never sees the old entry.
+      local tmp = dest .. ".zeta-link-" .. tostring(math.random(100000, 999999))
+      if not path.run("ln -sfn " .. path.quote(e.target) .. " " .. path.quote(tmp)) then
+        error(("failed to create symlink %q"):format(dest), 0)
+      end
+      local ok
+      if have_mv("T") then
+        ok = path.run("mv -Tf " .. path.quote(tmp) .. " " .. path.quote(dest))
+      else
+        -- No -T: unlink first so the rename cannot be read as a move *into*
+        -- an existing symlinked directory. Narrow window, best effort.
+        path.run("rm -f " .. path.quote(dest))
+        ok = path.run("mv -f " .. path.quote(tmp) .. " " .. path.quote(dest))
+      end
+      if not ok then
+        os.remove(tmp)
+        error(("failed to create symlink %q"):format(dest), 0)
+      end
+    else
+      local tmp = dest .. ".zeta-tmp-" .. tostring(math.random(100000, 999999))
+      if not path.run("cp -a " .. path.quote(src) .. " " .. path.quote(tmp)) then
+        os.remove(tmp)
+        error(("failed to install %q"):format(e.rel), 0)
+      end
+      if not path.run("mv -f " .. path.quote(tmp) .. " " .. path.quote(dest)) then
+        os.remove(tmp)
+        error(("failed to install %q"):format(e.rel), 0)
+      end
+    end
+  end
+
+  -- `cp --parents` rebuilds the whole relative tree under the root in a single
+  -- process -- mode, ownership, timestamps and symlinks all included -- instead
+  -- of a `cp` plus an `mv` (four processes with their shells) for every entry.
+  -- That per-entry cost was the 31 second commit phase. The copy lands in the
+  -- shadow tree (see pick_shadow) and each entry is then renamed() into place,
+  -- grouped per destination directory so a chunk costs one mv process per
+  -- directory instead of per entry. Capabilities are probed once; any failure
+  -- drops this chunk to place_one and stops further attempts, which is exactly
+  -- what every install did before, so the worst case is no worse than it used
+  -- to be.
+  local bulk_enabled
+  local function bulk_supported()
+    if bulk_enabled == nil then
+      local f = path.popen("cp --help 2>/dev/null")
+      local txt = f and f:read("*a") or ""
+      if f then f:close() end
+      bulk_enabled = txt:find("--parents", 1, true) ~= nil
+    end
+    return bulk_enabled
+  end
+
+  local function bulk_place(chunk)
+    local sh = pick_shadow()
+    if not sh then
+      bulk_enabled = false
+    else
+      local rels = {}
+      for _, e in ipairs(chunk) do rels[#rels + 1] = path.quote(e.rel) end
+      local cmd = "cd " .. path.quote(staging)
+        .. " && cp -a --parents " .. table.concat(rels, " ") .. " " .. path.quote(sh)
+      if path.run(cmd) then
+        -- Swap in, grouped by destination directory.
+        local groups, order = {}, {}
+        for _, e in ipairs(chunk) do
+          local d = path.dirname(path.join(root, e.rel))
+          ensure_dir(d)
+          local g = groups[d]
+          if not g then
+            g = { dest = d }
+            groups[d] = g
+            order[#order + 1] = g
+          end
+          g[#g + 1] = e
+        end
+        for _, g in ipairs(order) do
+          -- Rename only when source and destination share a filesystem: a
+          -- cross-device mv silently degrades to a non-atomic copy, and
+          -- mountpoints inside the root (/run, /var/cache on tmpfs) are
+          -- exactly where that would bite. Those entries take place_one,
+          -- whose temp sits in the destination's own directory.
+          local placed = false
+          if device_of(g.dest) == shadow_dev then
+            local srcs = {}
+            for _, e in ipairs(g) do srcs[#srcs + 1] = path.join(sh, e.rel) end
+            if have_mv("t") then
+              placed = path.run("mv -f -t " .. path.quote(g.dest)
+                .. " " .. table.concat(srcs, " "))
+            else
+              placed = true
+              for i, e in ipairs(g) do
+                if not path.run("mv -f " .. path.quote(srcs[i]) .. " "
+                    .. path.quote(path.join(root, e.rel))) then
+                  placed = false
+                  break
+                end
+              end
+            end
+          end
+          if not placed then
+            for _, e in ipairs(g) do
+              place_one(e, path.join(staging, e.rel), path.join(root, e.rel))
+            end
+          end
+        end
+        return
+      end
+      bulk_enabled = false
+    end
+    for _, e in ipairs(chunk) do
+      place_one(e, path.join(staging, e.rel), path.join(root, e.rel))
+    end
+  end
+
+  -- Placement runs inside a pcall so the shadow tree is removed on both the
+  -- success and the failure path: an error would otherwise strand it at the
+  -- root of the system until the next run's sweep.
+  local placed_ok, placed_err = pcall(function()
+    -- Pass 1: directories are created directly, everything else is queued.
+    local place = {}
+    for _, e in ipairs(owned) do
+      if e.type == "dir" then
+        local dest = path.join(root, e.rel)
+        ensure_dir(dest)
+        dir_count = dir_count + 1
+        emit(e, path.join(staging, e.rel), dest)
+      else
+        place[#place + 1] = e
+      end
+    end
+
+    -- Pass 2: place the queued entries in chunks. 25 keeps `cp`'s command line
+    -- tiny while still collapsing ~1500 shells into a handful, and the counter
+    -- still moves visibly between chunks.
+    if #place > 0 then path.mkdir_p(root) end
+    local CHUNK = 25
+    local start = 1
+    while start <= #place do
+      local stop = math.min(start + CHUNK - 1, #place)
+      local chunk = {}
+      for k = start, stop do chunk[#chunk + 1] = place[k] end
+      start = stop + 1
+
+      if bulk_supported() then
+        bulk_place(chunk)
+      else
+        for _, e in ipairs(chunk) do
+          place_one(e, path.join(staging, e.rel), path.join(root, e.rel))
+        end
+      end
+
+      for _, e in ipairs(chunk) do
+        if e.type == "symlink" then
+          sym_count = sym_count + 1
+        else
+          file_count = file_count + 1
+        end
+        emit(e, path.join(staging, e.rel), path.join(root, e.rel))
+      end
+    end
+  end)
+  if shadow then path.run("rm -rf " .. path.quote(shadow)) end
+  if not placed_ok then error(placed_err, 0) end
 
   -- Final count line, replacing the live line in place. Batch mode leaves the
   -- counter to the caller.
@@ -359,9 +597,28 @@ function commit.run_system_ops(opts)
     -- the tree with the stale cache shipped inside the glibc payload — inside
     -- a chroot/bwrap nothing in /lib or /usr/lib then resolves (the runtime
     -- system search path only covers /lib64 and /usr/lib64).
+    --
+    -- On the host the write must be ATOMIC: /etc/ld.so.cache is opened (and
+    -- often mmap'd) by every exec and dlopen, and ldconfig rewrites its cache
+    -- file in place — truncate first, then write. A process resolving a
+    -- library during that window parses a torn cache and segfaults (this is
+    -- the `... error 4 in ld-linux-x86-64.so.2` burst right after a huge
+    -- transaction). Build into a private file and rename() it into place: a
+    -- reader then sees either the old cache or the new one, never a partial.
+    -- A non-host store has no live readers, so it keeps plain ldconfig -r.
     local ldcmd = on_host and "ldconfig" or ("ldconfig -r " .. path.quote(r))
     log.step("Regenerating ldconfig cache")
-    if path.run(ldcmd) then
+    local ldc_ok
+    if on_host then
+      local cache = path.join(r, "etc/ld.so.cache")
+      local tmpcache = cache .. ".zeta-tmp"
+      ldc_ok = path.run(ldcmd .. " -C " .. path.quote(tmpcache))
+        and path.run("mv -f " .. path.quote(tmpcache) .. " " .. path.quote(cache))
+      if not ldc_ok then os.remove(tmpcache) end
+    else
+      ldc_ok = path.run(ldcmd)
+    end
+    if ldc_ok then
       log.ok("ld.so.cache updated")
     else
       log.warn("ldconfig failed (non-fatal, but libraries may not be found at runtime)")
