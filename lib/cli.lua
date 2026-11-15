@@ -5,7 +5,7 @@
 -- -Help). Match is case-insensitive so -provide and -PROVIDE also work. Flags
 -- start with a double dash (--pass, --force, --with-deps, --detail,
 -- --silence, --jobs, --help).
--- Install/delete commands accept one or more package names.
+-- Install/delete commands accept one or more construct names.
 
 local cli = {}
 
@@ -85,7 +85,7 @@ function cli.parse(args)
         end
         local n = tonumber(val)
         if not n or n < 1 or n ~= math.floor(n) then
-          return nil, ("--jobs expects a positive integer, got %q"):format(val)
+          return nil, ("--jobs expects a positive integer, got nothing or something that made no sense"):format(val)
         end
         flags.jobs = n
       elseif key == "help" then
@@ -105,10 +105,10 @@ function cli.parse(args)
       if COMMANDS[c] then
         cmd = c
       else
-        return nil, ("unknown command."):format(a)
+        return nil, ("the command %q is a part of your delusion"):format(a)
       end
     elseif not cmd then
-      return nil, ("expected a command first, got %q"):format(a)
+      return nil, ("expected a command first, got %q instead"):format(a)
     else
       pos[#pos + 1] = a
     end
@@ -121,12 +121,12 @@ function cli.parse(args)
 
   local want = ARITY[cmd]
   if want ~= nil and #pos ~= want then
-    return nil, ("command -%s expects %d argument(s), got %d"):format(
+    return nil, ("command -%s expects %d argument(s), not nothing."):format(
       cmd:gsub("^.", string.upper), want, #pos)
   end
   local min = MIN_ARGS[cmd]
   if min and #pos < min then
-    return nil, ("command -%s expects at least %d argument(s), got %d"):format(
+    return nil, ("command -%s expects at least %d argument(s), not nothing."):format(
       cmd:gsub("^.", string.upper), min, #pos)
   end
 

@@ -113,7 +113,7 @@ function log.error(msg)
   settle()
   local q = quotes.is_enabled() and quotes.pick(quotes.error) or nil
   if q then
-    io.stderr:write(paint("red", q) .. "\nCause : " .. msg .. "\n")
+    io.stderr:write(paint("red", q) .. "\nCause: " .. msg .. "\n")
   else
     io.stderr:write(paint("red", "error") .. " " .. msg .. "\n")
   end

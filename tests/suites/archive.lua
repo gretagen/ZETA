@@ -242,7 +242,7 @@ end)
 
 -- Root-clutter guard: with strip>0, a regular file at (or shallower than) the
 -- stripped depth would extract as a bare top-level file into the destination
--- root — the perl-5.42.3 regression (962 Pod::Man *.0 pages landed in /).
+-- root: the perl-5.42.3 regression (962 Pod::Man *.0 pages landed in /).
 -- The construct tarballs use `./`-prefixed members (tar -C <stage> .), so the
 -- `/ .` lead-in is itself the single stripped component.
 suite:test("rejects top-level file member with strip", function()

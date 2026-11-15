@@ -50,13 +50,13 @@ function deps.resolve(target, ctx)
       local inst = ctx.installed_version and ctx.installed_version(dep.name)
       if inst then
         if vercmp.satisfies(inst, dep) then
-          log.detail(("dependency %s satisfied by installed %s-%s"):format(
+          log.detail(("dependency %s satisfied by provided %s-%s"):format(
             dep.name, dep.name, inst))
         else
           -- An installed-but-too-old dependency cannot be fixed by a fresh
           -- install of the same version, so we refuse loudly rather than
           -- produce a subtly broken system.
-          error(("installed %s-%s does not satisfy dependency %s%s%s (use -ReProvide %s)"):format(
+          error(("provided %s-%s does not satisfy dependency %s%s%s (use -ReProvide %s)"):format(
             dep.name, inst, dep.name, dep.op or "", dep.version or "", dep.name), 0)
         end
       else

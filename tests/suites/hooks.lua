@@ -7,7 +7,7 @@ local path = require("path")
 local config = require("config")
 local suite = lib.new_suite("hooks")
 
--- path.stat_owner_and_perms ------------------------------------------------
+-- path.stat_owner_and_perms
 
 suite:test("stat_owner_and_perms returns uid and perms for an existing file", function()
   local root = lib.tmpdir("hooks-perms")
@@ -41,7 +41,7 @@ suite:test("stat_owner_and_perms reflects chmod changes", function()
   lib.assert_eq(perms600, 600)
 end)
 
--- db.file_owner -------------------------------------------------------------
+-- db.file_owner
 
 suite:test("file_owner returns nil for an untracked file", function()
   local root = lib.tmpdir("hooks-db")
@@ -72,7 +72,7 @@ suite:test("file_owner returns first owner when file is shared", function()
     "owner should be one of the two packages")
 end)
 
--- hooks.run_installed integration (permission-gated) ------------------------
+-- hooks.run_installed integration (permission-gated)
 
 -- NOTE: The following integration tests exercise hooks.run_installed in a
 -- non-root environment. Because check_hook_safety enforces uid=0, hooks

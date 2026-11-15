@@ -191,13 +191,11 @@ suite:test("files whitelist filters the commit", function()
   lib.assert_false(found["usr/lib/liba.so"])
 end)
 
--- ---------------------------------------------------------------------------
 -- Liveness: a transaction runs while the system is using the files it
 -- replaces. These are the regressions behind "a huge zeta transaction
 -- crashes your stuff": in-place rewrites of mmap'd libraries segfault
 -- running daemons, and a non-atomic symlink swap leaves a window where the
 -- path is missing and a restarting service fails to start.
--- ---------------------------------------------------------------------------
 
 local function count_matches(dir, name)
   local f = path.popen("find " .. path.quote(dir) .. " -maxdepth 1 -name "

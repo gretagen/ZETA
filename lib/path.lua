@@ -6,9 +6,7 @@
 
 local path = {}
 
--- ---------------------------------------------------------------------------
 -- Cleanup hooks for signal handling
--- ---------------------------------------------------------------------------
 
 -- Functions registered here are called by path.run_cleanup() so background
 -- processes (spinner, download scripts) are killed on Ctrl+C.
@@ -31,9 +29,7 @@ function path.run_cleanup()
   for _, fn in ipairs(cleanup_hooks) do fn() end
 end
 
--- ---------------------------------------------------------------------------
 -- String helpers
--- ---------------------------------------------------------------------------
 
 -- Join path components with a single separator. Only the first non-empty
 -- component decides whether the result is absolute; later components are
@@ -103,7 +99,7 @@ function path.relative_inside(p)
 end
 
 -- True if a symlink located at `rel` whose target is `target` would escape
--- the installation root. Absolute targets are allowed — they resolve at
+-- the installation root. Absolute targets are allowed: they resolve at
 -- runtime against the real root. Relative targets are checked for ".."
 -- traversal that would climb above the root.
 function path.symlink_escapes(rel, target)
@@ -124,9 +120,7 @@ function path.sanitize_name(name)
   return name
 end
 
--- ---------------------------------------------------------------------------
 -- Subprocess helpers
--- ---------------------------------------------------------------------------
 
 -- Resolve the shell used for every subprocess. /bin/sh is not guaranteed to
 -- be POSIX-bash (e.g. Haliade's lean custom shell 'thesh' lacks redirections,
@@ -162,9 +156,7 @@ function path.popen(cmd)
   return io.popen(path.shell .. " -c " .. path.quote(cmd))
 end
 
--- ---------------------------------------------------------------------------
 -- Signal-safe subprocess helpers
--- ---------------------------------------------------------------------------
 --
 -- os.execute() is system(3), and POSIX requires system() to block SIGINT for
 -- the whole call. ZETA's download monitor loops sit inside os.execute ~100%
@@ -226,9 +218,7 @@ function path.run_interruptible(cmd)
   return rc == 0, rc, pid
 end
 
--- ---------------------------------------------------------------------------
 -- Background jobs that can be killed as a tree
--- ---------------------------------------------------------------------------
 --
 -- A job started with `&` from a non-interactive shell has SIGINT ignored, so
 -- the `trap ... INT; kill 0` in ZETA's download scripts can never fire -- and

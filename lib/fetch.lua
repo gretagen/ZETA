@@ -483,7 +483,7 @@ end
 -- Shows a progress counter: "<label>... [done/total] /"
 function fetch.get_parallel(items, opts)
   opts = opts or {}
-  local progress_label = opts.label or ("downloading %d packages")
+  local progress_label = opts.label or ("downloading %d constructs")
   local dl = fetch.downloader()
   if not dl then
     local results = {}

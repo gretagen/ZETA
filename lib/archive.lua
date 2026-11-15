@@ -206,8 +206,8 @@ end
 
 -- Zip members are listed with `zipinfo -1` (names, dirs carry a trailing
 -- slash). Zip stores unix file attributes, so a second `zipinfo` table
--- pass detects symlinks BEFORE anything is extracted — preserving the
--- two-phase promise for hostile archives — and their targets are read from
+-- pass detects symlinks BEFORE anything is extracted, preserving the
+-- two-phase promise for hostile archives, and their targets are read from
 -- the entry content (`unzip -p`). Zip has no --strip: strip=0 extracts
 -- straight into the destination, strip>0 extracts to a temp tree and moves
 -- the surviving members with their leading components dropped.
@@ -239,7 +239,7 @@ function archive.extract_zip(zip_file, dest, opts)
     return nil, ("no zip members in %s"):format(path.basename(zip_file))
   end
 
-  -- Pass 2: unix attribute table — symlink entries get their type and
+  -- Pass 2: unix attribute table: symlink entries get their type and
   -- target before any validation or extraction happens.
   local sf = path.popen("zipinfo " .. path.quote(zip_file) .. " 2>/dev/null")
   if sf then

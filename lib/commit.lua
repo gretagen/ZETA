@@ -163,7 +163,7 @@ end
 
 -- apply(staging, opts) -> owned entries (files + symlinks + dirs).
 -- opts: whitelist (list of rel paths to commit), force, pkg_name,
---       root (explicit install root — overrides config; set for isolated
+--       root (explicit install root: overrides config; set for isolated
 --       installs so the host filesystem and linker cache are never touched),
 --       defer_system (skip the linker-cache/schema work here; the caller runs
 --       commit.run_system_ops once at the end of the transaction),
@@ -566,7 +566,7 @@ function commit.run_system_ops(opts)
   -- wrapper's LD_LIBRARY_PATH as fallback).
   if not opts.isolated then
     -- Ensure the top-level ld.so.conf exists. Packages never ship one, so a
-    -- deployed tree would only have the orphaned snippet below — and ldconfig
+    -- deployed tree would only have the orphaned snippet below, and ldconfig
     -- reads ld.so.conf.d exclusively through this file's include directive.
     local topconf = path.join(r, "etc/ld.so.conf")
     if not path.exists(topconf) then
@@ -594,13 +594,13 @@ function commit.run_system_ops(opts)
     -- Rebuild the shared library cache so newly installed libraries are found
     -- at runtime. ldconfig is idempotent and fast. For a non-host root this
     -- MUST be rooted: plain ldconfig rewrites the *host's* cache and leaves
-    -- the tree with the stale cache shipped inside the glibc payload — inside
+    -- the tree with the stale cache shipped inside the glibc payload: inside
     -- a chroot/bwrap nothing in /lib or /usr/lib then resolves (the runtime
     -- system search path only covers /lib64 and /usr/lib64).
     --
     -- On the host the write must be ATOMIC: /etc/ld.so.cache is opened (and
     -- often mmap'd) by every exec and dlopen, and ldconfig rewrites its cache
-    -- file in place — truncate first, then write. A process resolving a
+    -- file in place: truncate first, then write. A process resolving a
     -- library during that window parses a torn cache and segfaults (this is
     -- the `... error 4 in ld-linux-x86-64.so.2` burst right after a huge
     -- transaction). Build into a private file and rename() it into place: a
@@ -704,7 +704,7 @@ function commit.run_system_ops(opts)
   -- RELATIVE symlink so isolated stores stay self-contained and package
   -- upgrades take effect through the same path. Never overwrites an
   -- existing /etc file (other packages own those directly), and is
-  -- idempotent — it also heals systems installed before this hook existed.
+  -- idempotent, it also heals systems installed before this hook existed.
   local usretc = root .. "/usr/etc"
   if path.exists(usretc) then
     log.step("mirroring usr/etc configs into /etc")

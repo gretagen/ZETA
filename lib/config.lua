@@ -85,9 +85,7 @@ local function load_config_file(filepath)
   return nil
 end
 
--- ---------------------------------------------------------------------------
 -- Writable temp dir
--- ---------------------------------------------------------------------------
 --
 -- <root>/var/tmp/zeta is root-owned on a real system, so the read-only
 -- commands a normal user runs (-Localize resolving origins, and the manifest

@@ -1,25 +1,7 @@
 #!/bin/bash
-# zeta launcher: runs the entry point with the system Lua interpreter.
-#
-# Only the operations that need superuser privileges are gated:
-#
-#   -Provide -ReProvide -LocalProvide -Solve -Transcend -Delete -Test -Forget
-#
-# Everything else runs as any user -- the read-only commands (-Localize searches
-# the remote index, -List reads the installed database, -Help prints usage) and
-# any invocation Zeta itself rejects with a usage error (no command, unknown
-# command), which reports the error instead of a privilege quote. Keep the
-# privileged list in sync with COMMANDS in lib/cli.lua.
-#
-# The command token is resolved exactly the way lib/cli.lua does: the first
-# single-dash argument, matched case-insensitively (so -list and -LIST work
-# too), with "h" an alias for "help"; --help sets the command unconditionally,
-# so "zeta -List --help" resolves to help.
-#
-# This is a courtesy gate, not a security boundary: lib/zeta/zeta.lua can
-# still be run directly with any Lua interpreter.
 
-# Resolve the command the way lib/cli.lua would.
+# zeta launcher: runs the entry point with the system Lua interpreter because obviously zeta ain't a single bash script
+# what are we, kiss linux?
 
 cmd=""
 for a in "$@"; do
@@ -28,7 +10,7 @@ for a in "$@"; do
             cmd="help"
             ;;
         --*)
-            # Any other --flag never names a command.
+            # Any other flag never names a command
             ;;
         -*)
             if [ -z "$cmd" ]; then
@@ -43,7 +25,8 @@ done
 
 case "$cmd" in
     provide|reprovide|localprovide|solve|transcend|delete|test|forget)
-        # Privileged: mutates the system or its download cache.
+        # We're not letting a user do these ones without root, because they need root, they interact with system stuff
+        # And it also does quotes cuz zeta isn't boring 
         if [ "$EUID" -ne 0 ]; then
             quotes=(
                 "This operation requires superuser privileges to function."
@@ -55,7 +38,7 @@ case "$cmd" in
                 "Are you familiar with the term root access?"
                 "ZETA demands supreme authority."
                 "My apologies $USER, but superuser privileges are required."
-                "It is with dissapointment that you can't do that without superuser privileges"
+                "It is with disappointment that you can't do that without superuser privileges"
                 "It's a shame you can't do that without superuser privileges"
                 "Basic security."
                 "You know, even if were able to use this without superuser privileges, it would fail right?"
@@ -78,24 +61,40 @@ case "$cmd" in
                 "Trying running it as root next time"
                 "$USER... you know you can't do that without privileges..."
                 "Are you? Are you?"
-                "Well that's embarassing."
+                "Well that's embarrassing."
+                "Embarassingggg",
+                "Ou shiii"
+                "bro"
+                "Arghhh almost almost almost"
                 "*cough cough* root access... *cough cough*"
                 "N-no! not without root baka...."
-                "Picture this: you want to install a package, and everyone in the system will use it; BE ROOT"
+                "Picture this: you want to install a package, and everyone in the system will use it : BE ROOT"
                 "What's the magic word?"
                 "Who's gonna tell them?"
+                "Holy egoism"
+                "Egoism is when no"
+                "Yep yep yep yep $USER is coderotted yep yep god save us all yep yep"
+                "That's something $USER would do and think they're smart"
+                "I'm tired, boss"
+                "And why should I let you do this?"
+                "say please"
+                "Used to being the root user that much huh?"
+                "Aware you're running this as $USER and not as root?"
+                "Albert and Einstein over here"
+                "Seems you ain't the sharpest knife in the drawer"
+                "You IDIOT"
             )
 
-            # Select a random quote from the array
+            # We use this to randomize the quotes 
             rand_idx=$((RANDOM % ${#quotes[@]}))
             echo "${quotes[$rand_idx]}"
             exit 1
         fi
         ;;
     *)
-        # -Localize / -List / -Help are read-only, and anything else is a
-        # usage error that Zeta reports itself.
+     # bla bla bla errors here errors there, zeta reports errors itself
         ;;
 esac
 
 exec lua "$(dirname "$0")/../lib/zeta/zeta.lua" "$@"
+# this executes the actual zeta frontend

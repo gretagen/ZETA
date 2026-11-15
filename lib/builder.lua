@@ -115,7 +115,7 @@ local function make_p(manifest, dirs)
   -- Generic tool runner (meson/ninja/make/cmake).
   local function tool(p, name, args)
     if not find_tool(p, name) then
-      error(("tool %q not found in PATH for %s — add %q to deps or install it"):format(
+      error(("tool %q not found in PATH for %s: add %q to deps or install it"):format(
         name, p.name, name), 0)
     end
     local parts = { name }
@@ -374,7 +374,7 @@ function builder.stage_one(manifest, opts)
       f:close()
     end
     if uname and uname ~= manifest.arch then
-      error(("package %s targets architecture %q but this machine is %q"):format(
+      error(("construct %s targets architecture %q but this machine is %q"):format(
         name, manifest.arch, uname), 0)
     end
   end
@@ -498,9 +498,7 @@ function builder.commit_wire(items)
   end
 end
 
--- ---------------------------------------------------------------------------
 -- Commit pool
--- ---------------------------------------------------------------------------
 
 -- The Lua interpreter running us (arg[-1], the pattern the test harness uses).
 local LUA_BIN = (arg and arg[-1]) or "lua"

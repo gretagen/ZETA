@@ -12,9 +12,7 @@ local suite = lib.new_suite("e2e")
 
 local PKG = path.join(lib.root, "packages")
 
--- ---------------------------------------------------------------------------
 -- Fixture repository
--- ---------------------------------------------------------------------------
 
 local REPO = lib.tmpdir("e2e-repo")
 local FIXT = lib.tmpdir("e2e-payloads")
@@ -144,9 +142,7 @@ repo_write("index.lua",
     .. "{name='repacked',version='1.0',summary='in-place repack test'}, "
     .. "{name='fallback',version='1.0',summary='origin fallback'} }\n")
 
--- ---------------------------------------------------------------------------
 -- Runner helpers
--- ---------------------------------------------------------------------------
 
 local function env(root)
   return {
@@ -194,9 +190,7 @@ off_write("pkgwithdep/package.lua",
   "return { name='pkgwithdep', version='1.0', url='" .. file_url(nh_tar) .. "', sha256='"
     .. nh_sha .. "', deps={'ghost'}, archive={strip=1} }\n")
 
--- ---------------------------------------------------------------------------
 -- Tests
--- ---------------------------------------------------------------------------
 
 suite:test("-Localize searches the remote index", function()
   local code, out = lib.run_zeta({ "-Localize", "hello" }, fresh_env())
@@ -333,7 +327,7 @@ suite:test("an orphaned dependency still confirms before deletion", function()
   -- empty Enter cancels (default NO)
   local code, out = lib.run_zeta({ "-Delete", "hello" }, e, "\n")
   lib.assert_eq(code, 0)
-  lib.assert_contains(out, "Delete 1 package")
+  lib.assert_contains(out, "Delete 1 construct")
   lib.assert_contains(out, "aborted by user")
   lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/hello")))
   -- explicit yes deletes it
@@ -350,7 +344,7 @@ suite:test("-Delete shows the file plan before confirming", function()
   lib.assert_eq(code, 0)
   lib.assert_contains(out, "will delete hello-1.0")
   lib.assert_contains(out, "usr/bin/hello")
-  lib.assert_contains(out, "Delete 1 package")
+  lib.assert_contains(out, "Delete 1 construct")
   lib.assert_contains(out, "aborted by user")
   lib.assert_true(lib.exists(path.join(e.ZETA_ROOT, "usr/bin/hello")))
 end)
@@ -416,7 +410,7 @@ suite:test("-List splits packages and dependencies into sections", function()
   lib.run_zeta({ "-Provide", "app", "--pass" }, e)
   local code, out = lib.run_zeta({ "-List" }, e)
   lib.assert_eq(code, 0)
-  lib.assert_contains(out, "PACKAGES (1)")
+  lib.assert_contains(out, "CONSTRUCTS (1)")
   lib.assert_contains(out, "DEPENDENCIES (1)")
   lib.assert_contains(out, "app")
   lib.assert_contains(out, "hello")
@@ -565,9 +559,7 @@ suite:test("-Delete unlinks exactly the owned files", function()
   lib.assert_false(db.is_installed("hello"))
 end)
 
--- ---------------------------------------------------------------------------
 -- Offline discovery + -Test
--- ---------------------------------------------------------------------------
 
 suite:test("-LocalProvide works offline via script_dir discovery", function()
   -- No ZETA_LOCAL_PACKAGES and no network: the binary must find the real
@@ -632,9 +624,7 @@ suite:test("-Test fails when a dependency is missing locally", function()
   lib.assert_contains(out, "not found in local tree")
 end)
 
--- ---------------------------------------------------------------------------
 -- -Transcend tests
--- ---------------------------------------------------------------------------
 
 suite:test("-Transcend upgrades packages to newer versions", function()
   local e = fresh_env()
@@ -666,19 +656,17 @@ suite:test("-Transcend reports up-to-date when nothing to upgrade", function()
   lib.run_zeta({ "-ReProvide", "upgradable", "--pass" }, e)
   local code, out = lib.run_zeta({ "-Transcend", "--pass" }, e)
   lib.assert_eq(code, 0, out)
-  lib.assert_contains(out, "all packages are up to date")
+  lib.assert_contains(out, "all constructs are up to date")
 end)
 
 suite:test("-Transcend with no packages installed does nothing", function()
   local e = fresh_env()
   local code, out = lib.run_zeta({ "-Transcend", "--pass" }, e)
   lib.assert_eq(code, 0, out)
-  lib.assert_contains(out, "no packages installed")
+  lib.assert_contains(out, "no constructs provided")
 end)
 
--- ---------------------------------------------------------------------------
 -- Multi-ownership tests
--- ---------------------------------------------------------------------------
 
 suite:test("two packages can own the same file without conflict", function()
   local e = fresh_env()
