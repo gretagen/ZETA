@@ -231,6 +231,20 @@ suite:test("-Provide installs from the remote repository", function()
   lib.assert_eq(db.files("hello"), { "usr/bin/hello" })
 end)
 
+suite:test("-Provide prints a phase timings receipt", function()
+  local e = fresh_env()
+  local code, out = lib.run_zeta({ "-Provide", "hello", "--pass" }, e)
+  lib.assert_eq(code, 0, out)
+  local line = out:match("timings: [^\n]+")
+  lib.assert_true(line ~= nil, "expected a timings line in output:\n" .. out)
+  -- All five phases in pipeline order, each with a duration.
+  lib.assert_true(
+    line:match("^timings: resolve %d+%.%d+s | fetch %d+%.%d+s | "
+      .. "verify %d+%.%d+s | extract %d+%.%d+s | commit %d+%.%d+s %(count %d+%.%d+s, pool %d+%.%d+s%)$")
+      ~= nil,
+    "unexpected timings format: " .. line)
+end)
+
 suite:test("-Provide on an installed package warns", function()
   local e = fresh_env()
   lib.run_zeta({ "-Provide", "hello", "--pass" }, e)
