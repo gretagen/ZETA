@@ -29,9 +29,7 @@ local config = require("config")
 local path = require("path")
 local sandbox = require("sandbox")
 
--- ---------------------------------------------------------------------------
 -- Minimal Lua table serializer (for meta.lua)
--- ---------------------------------------------------------------------------
 
 local function ser(v)
   local t = type(v)
@@ -55,9 +53,7 @@ local function ser(v)
   return "nil"
 end
 
--- ---------------------------------------------------------------------------
 -- Layout + lazy migration
--- ---------------------------------------------------------------------------
 
 function db.dir()
   return config.get().state_dir
@@ -237,9 +233,7 @@ local function ensure_migrated()
   finish_migration(sd)
 end
 
--- ---------------------------------------------------------------------------
 -- Paths
--- ---------------------------------------------------------------------------
 
 -- The on-disk directory for `name`, resolved by its current kind. Entries
 -- that are not installed yet default to the packages registry (used when
@@ -259,9 +253,7 @@ function db.files_path(name)
   return path.join(db.pkg_dir(name), "files")
 end
 
--- ---------------------------------------------------------------------------
 -- Queries
--- ---------------------------------------------------------------------------
 
 -- "package" for explicit installs, "dependency" for auto-installed ones,
 -- nil when not installed.
@@ -421,9 +413,7 @@ function db.file_owner_index()
   return index
 end
 
--- ---------------------------------------------------------------------------
 -- Mutation
--- ---------------------------------------------------------------------------
 
 -- Rewrite only the meta.lua of an installed entry (keeps `files` untouched).
 local function write_meta(name, m)

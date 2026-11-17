@@ -27,55 +27,81 @@ local quotes = require("quotes")
 local profile = require("profile")
 
 local HELP = [[
-Zeta -- Haliade system package manager
+
+                                                           
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                    %%%%%%%%%%%%%%%%%%                     
+                           %%%                             
+                           %%%                             
+                           %%%                             
+                           %%%                             
+                           %%%               %             
+                           %%%%             %%%            
+      %%%%%%%%%%%        %%%@@%%%%         %%%%%           
+     %%%%%%%%%%%%%%   %%%%%%   %%%%%%     %%%%%%%          
+    %%%%%%%%%%%%%%%%%%%%%         %%%%%% %%%%%%%%%         
+   %%%%%%%%%%%%%%%%%%%               %%%%%%%%%%%%%%        
+   %%%%%%%%%%%%%%%%%%                  %%%%%%%%%%%%%       
+   %%%%%%%%%%%%%%%%%                  %%%%%%%%%%%%%%%      
+    %%%%%%%%%%%%%%%%                %%%%%%%%%%%%%%%%%%     
+     %%%%%%%%%%%%%                 %%%%%%%%%%%%%%%%%%%%    
+       %%%%%%%%%                  %%%%%%%%%%%%%%%%%%%%%%   
+                                                           
+                                                           
+
+zeta | construct management system of Haliade
 
 Usage: zeta <command> [arguments] [flags]
 
 Commands:
-  -Provide <pkg>...       Install packages and their dependencies from the remote repository
-  -ReProvide <pkg>...     Reinstall packages even if they are already installed
-  -LocalProvide <pkg>...  Install packages from the local /packages tree
-  -Solve <pkg>...         Repair a package by reinstalling its direct
-                          dependencies (the package itself is left intact).
+  -Provide <pkg>...       Provide constructs and their dependencies from the remote repository
+  -ReProvide <pkg>...     Reinstall constructs even if they are already installed
+  -LocalProvide <pkg>...  Install constructs from the local /packages tree
+  -Solve <pkg>...         Repair a construct by reinstalling its direct
+                          dependencies (the construct itself is left intact).
                           With --isolate, rebuild its whole reserved store
                           instead.
-  -Transcend              Update all installed packages to their latest versions
-  -Delete <pkg>...        Delete installed packages (see --with-deps)
-  -List                   List installed packages and dependencies
-  -Localize <query>       Search the remote repository index for <query>
-                          (shows the repository each package is served from)
-  -Test <pkg>             Verify <pkg> offline WITHOUT installing it
-  -Forget                 Delete all cached packages
+  -Transcend              Transcend all installed constructs to their latest versions
+  -Delete <pkg>...        Delete constructs (see --with-deps)
+  -List                   List installed constructs and dependencies
+  -Localize <query>       Search the index of constructs
+  -Test <pkg>             Verify a construct offline WITHOUT installing it
+  -Forget                 Delete all cached constructs
   -Help                   Show this help
 
 Flags:
-  --pass                  Skip the Y/N confirmation prompt and proceed immediately
-  --force                 Override reverse-dependency and already-installed safety checks
-                          (deletion still asks for confirmation)
+  --pass                  Proceed immediately with an action
+  --force                 Force an operation
   --with-deps             With -Delete, also delete dependencies that are no longer
-                          required by any installed package (never deletes packages
+                          required by any installed construct (never deletes constructs
                           installed explicitly)
-  --detail                Deprecated: -Delete now always lists every file
   --silence               Suppress tar extraction file listings
-                          (faster on slow terminals)
   --isolate               With -Provide/-ReProvide/-LocalProvide: install into a
                           self-contained store at <root>/zeta/reserve/<pkg>-<version>
-                          (package + full dependency closure, exposed through
+                          (construct + full dependency closure, exposed through
                           <root>/zeta/reserve/profile/bin and linked into
                           /usr/bin / /usr/sbin, skipping names already taken).
                           With -Solve: rebuild that store in place.
                           With -Delete: delete the isolated store instead of
                           the system copy.
   --no-quote              Disable random startup quotes
-  --jobs=N                How many packages may be provided at the same time
+  --jobs=N                How many constructs may be provided at the same time
                           (default: 2; `jobs = nproc` in the config file
                           uses every core)
 
 Configuration:
-  /etc/zeta/configuration.lua   System-wide configuration (Lua table)
-  Precedence: env vars > config file > defaults
+  /etc/zeta/configuration.lua   System-wide configuration
 
-  Example /etc/zeta/configuration.lua:
+  Example:
+
     return {
       repos = {
         "https://github.com/gretagen/zeta-index",
@@ -85,26 +111,30 @@ Configuration:
       verbose = false,
       quotes = false,
       jobs = nproc, -- every core (or a plain number)
+      -- Constructs -Solve never reinstalls. REPLACES the built-in list
+      -- (glibc, ncurses, bash, gcc, openssl, ...), so copy those names
+      -- first if you want to extend it rather than swap it out.
+      do_not_solve = { "glibc", "ncurses" },
     }
 
 Installed state is tracked in three registries under /var/db/zeta:
-  packages/<name>      every package you installed explicitly
-  dependencies/<name>  packages pulled in automatically as dependencies
-  isolated/<name>      packages installed with --isolate (meta carries reserve_root)
+  packages/<name>      every construct you installed explicitly
+  dependencies/<name>  constructs pulled in automatically as dependencies
+  isolated/<name>      constructs installed with --isolate (meta carries reserve_root)
 
 Environment:
-  ZETA_ROOT            Filesystem root packages are installed into   (default: /)
+  ZETA_ROOT            Filesystem root constructs are installed into   (default: /)
   ZETA_REPOS           Remote repository URLs, space-separated, tried in order  (default: https://github.com/gretagen/zeta-index)
   ZETA_REPO            Single remote repo base URL (one-entry ZETA_REPOS)  (default: https://github.com/gretagen/zeta-index)
                        raw.githubusercontent.com)
   ZETA_LOCAL_PACKAGES  Local /packages tree                          (default: /usr/share/packages)
   ZETA_CACHE           Download cache                                (default: $ZETA_ROOT/var/cache/zeta)
-  ZETA_STATE           Package database                              (default: $ZETA_ROOT/var/db/zeta)
+  ZETA_STATE           Construct database                              (default: $ZETA_ROOT/var/db/zeta)
   ZETA_VERBOSE         Verbose output (1 or true to enable)          (default: false)
-  ZETA_RESERVE         Isolated package store location               (default: $ZETA_ROOT/zeta/reserve)
-  ZETA_JOBS            Packages provided at the same time (or "nproc")  (default: 2)
+  ZETA_RESERVE         Isolated construct store location               (default: $ZETA_ROOT/zeta/reserve)
+  ZETA_JOBS            Constructs provided at the same time (or "nproc")  (default: 2)
 
-Package format (one package.lua per package, returning a table):
+Construct format (one package.lua per construct, returning a table):
   return {
     name="glib", version="2.88.1", url="https://.../glib-2.88.1.tar.xz",
     sha256="...", deps={"libffi","pcre2"},
@@ -172,7 +202,7 @@ local function check_libraries(files, root)
 	probe:close()
 	if not where or where == "" then return end
 
-	log.step("Checking if libraries resolve.")
+	log.step("Checking if libraries behave fine.")
 	local unresolved = {}
 	for _, bin in ipairs(bins) do
 		if #bins > 1 then log.detail(bin) end
@@ -187,8 +217,8 @@ local function check_libraries(files, root)
 		end
 	end
 	if #unresolved > 0 then
-		log.warn(("%d Libraries unresolved, you may need to report to package maintenance."):format(#unresolved))
-		print(("unresolved libraries : %s,"):format(table.concat(unresolved, ", ")))
+		log.warn(("%d Library(ies) aren't unresolved, you may need to report to construct maintenance."):format(#unresolved))
+		print(("unresolved libraries: %s,"):format(table.concat(unresolved, ", ")))
 	else
 		log.ok("All libraries have been resolved.")
 	end
@@ -205,6 +235,139 @@ local function plan_kind(item, target)
 		return (cur == "dependency") and "dependency" or "package"
 	end
 	return (cur == "package") and "package" or "dependency"
+end
+
+-- The pre-target extract row: one line that rewrites in place while every
+-- dependency (or upgrade) stages, showing the phase, its own counter and the
+-- entry being extracted.
+--
+-- Narration is gated off for the duration because any print between two
+-- redraws would push the row down and make it repaint on a new line; member
+-- listings are gated off through the same switch --silence uses
+-- (log.is_file_silent), so tar/Arch/.deb/zip all inherit it. Only step and
+-- detail are gated: error/warn/ok/info stay live, and they settle the row
+-- first through log.on_settle so a failure never lands on top of it.
+--
+-- Returns draw(i, label) and finish(completed). finish() settles the row and
+-- restores every gate, so callers call it on both the success and the failure
+-- path; pass `completed` on success so the row is repainted in its finished
+-- colour first -- a failure must never leave a green "all done" line behind.
+
+local function begin_extract_row(noun, total)
+	local prev_silent = log.is_file_silent()
+	local prev_narration = log.set_narration(false)
+	log.set_file_silent(true)
+	local tty = spinner.enabled()
+
+	-- row_open: a row has been written but not newline-terminated. animated: a
+	-- background loop is drawing it, so settle has to kill it (keeping what it
+	-- drew) instead of just ending the line.
+
+	local row_open = false
+	local animated = false
+	local last_label
+
+	-- The row body: everything that follows the meter. `label` is nil for the
+	-- opening [ 0/N ] state so the line does not end in a space.
+	--
+	-- The progress number is cyan while dependencies land and green only once
+	-- every one of them has staged. Completion is passed in explicitly rather
+	-- than derived from `i >= total`: with a single dependency that test is
+	-- already true on the first (and only) iteration, which would turn the row
+	-- green while it was still extracting. The total stays cyan and the label
+	-- is grey, matching the colours the provide counter uses.
+
+	local function body(i, label, completed)
+		local s = (" - Extracting %s... [ %s/%s ]"):format(noun,
+			log.paint(completed and "green" or "cyan", tostring(i)),
+			log.paint("cyan", tostring(total)))
+		if label then s = s .. " " .. log.paint("dim", label) end
+		return s
+	end
+
+	-- Settle the row: kill the animation (TTY) or end the line (piped).
+	-- keep_row leaves whatever the meter last drew in place as a record of the
+	-- phase. Wired into log so a warn/error printed mid-extraction never lands
+	-- on top of the live row; finish() calls it too, and both no-op once
+	-- settled.
+
+	local function settle()
+		if not row_open then return end
+		row_open = false
+		if animated then
+			animated = false
+			spinner.stop(true)
+		else
+			io.write("\n")
+		end
+	end
+	log.on_settle(settle)
+
+	-- Paint the row: the meter animates at column 0 on a terminal, and is
+	-- frozen to its first frame when output is going somewhere piped. Clearing
+	-- first also drops any row left over from an earlier phase, so start_row
+	-- always gets the line to itself.
+	local function paint(post, animate)
+		local animate_row = tty and animate
+		if tty then spinner.stop() end
+		if animate_row then
+			spinner.start_row("", post)
+		else
+			io.write("\r\27[K" .. spinner.METRO[1] .. post)
+			io.flush()
+		end
+		animated = animate_row
+		row_open = true
+	end
+
+	paint(body(0, nil, false), true)
+
+	local function draw(i, label)
+		last_label = label
+		paint(body(i, label, false), true)
+	end
+
+	local function finish(completed)
+		if completed then paint(body(total, last_label, true), false) end
+		settle()
+		log.on_settle(nil)
+		log.set_narration(prev_narration)
+		log.set_file_silent(prev_silent)
+	end
+
+	return draw, finish
+end
+
+-- Space preflight before the extract phase. Every payload is unpacked into
+-- tmp_dir up front, and on HaliadeSYS that directory sits on a tmpfs -- a
+-- set that cannot fit there dies halfway through extraction instead of
+-- failing up front with a hint. Warn only: payloads can shrink on extract
+-- (xz/gz), and the remedy is one environment variable away.
+local function warn_stage_fit(payloads)
+	local total = 0
+	for _, p in ipairs(payloads) do
+		local f = io.open(p, "rb")
+		if f then
+			total = total + (f:seek("end") or 0)
+			f:close()
+		end
+	end
+	if total == 0 then return end
+	local tmp = config.get().tmp_dir
+	local df = path.popen("df -Pk " .. path.quote(tmp) .. " 2>/dev/null")
+	local avail_kb
+	if df then
+		for line in df:lines() do
+			local _, _, avail = line:match("%s(%d+)%s+(%d+)%s+(%d+)%s+%d+%%")
+			if avail then avail_kb = tonumber(avail) end
+		end
+		df:close()
+	end
+	if not avail_kb then return end
+	if total > avail_kb * 1024 * 0.8 then
+		log.warn(("payloads total ~%d MB but only %d MB is free in %s -- extraction may run out of space (set ZETA_TMP to a disk-backed directory if this is a tmpfs)"):format(
+			math.floor(total / 1048576), math.floor(avail_kb / 1024), tmp))
+	end
 end
 
 -- Shared install flow for -Provide / -LocalProvide / -ReProvide / -Solve.
@@ -238,7 +401,7 @@ function actions._install(name, flags, opts)
 				m._local_dir = path.join(base, n)
 				return m
 			end
-			log.detail(("local package %q not found, falling back to remote"):format(n))
+			log.detail(("local construct %q not found, falling back to remote"):format(n))
 			return repo.fetch_manifest(n)
 		end
 	else
@@ -330,6 +493,8 @@ function actions._install(name, flags, opts)
 		end
 	end
 
+	-- what a zigzag holy
+
 	-- Wrap fetch_manifest with the prefetch cache.
 	local function cached_fetch_manifest(n)
 		if manifest_cache[n] then return manifest_cache[n] end
@@ -340,7 +505,7 @@ function actions._install(name, flags, opts)
 	local target_manifest
 	local ok, plan
 	if direct_only then
-		-- -Solve (system): repair the target by reinstalling only the packages
+		-- -Solve repairs the target by reinstalling only the packages
 		-- it directly depends on. The target itself and everything deeper in
 		-- the tree are left untouched.
 		ok = true
@@ -349,13 +514,24 @@ function actions._install(name, flags, opts)
 		if not target_manifest then
 			ok, plan = false, ("cannot resolve package %q"):format(name)
 		else
+			-- Base libraries are never reinstalled from here: swapping them
+			-- under a running system is what makes every later shell print
+			-- "no version information available". `direct_only` is only true
+			-- when not isolating, so the isolate exemption is already handled
+			-- by that flag. Skipping before the fetch also avoids pulling the
+			-- manifest for a dep we are not going to touch.
+			local protected = config.get().do_not_solve
 			for _, dep in ipairs(target_manifest.deps or {}) do
-				local m = cached_fetch_manifest(dep.name)
-				if not m then
-					ok, plan = false, ("cannot resolve dependency %q"):format(dep.name)
-					break
+				if protected[dep.name] then
+					log.detail(("skipping %s as solving it would just break the system"):format(dep.name))
+				else
+					local m = cached_fetch_manifest(dep.name)
+					if not m then
+						ok, plan = false, ("can not resolve dependency %q"):format(dep.name)
+						break
+					end
+					plan[#plan + 1] = { name = dep.name, manifest = m }
 				end
-				plan[#plan + 1] = { name = dep.name, manifest = m }
 			end
 		end
 	else
@@ -364,6 +540,7 @@ function actions._install(name, flags, opts)
 			installed_version = function(n)
 				-- An isolated store is self-contained: it gets its own copy of
 				-- the whole closure instead of accepting system-installed deps.
+				-- if you've ever used Nix or Guix, you may already know that
 				if isolate then return nil end
 				local m = db.get(n)
 				return m and m.version or nil
@@ -391,7 +568,7 @@ function actions._install(name, flags, opts)
 	if target_manifest and target_manifest.url then
 		local repo_name = target_manifest.url:match("zeta%-([^/]+)")
 		if repo_name then
-			log.step("Core package found at: zeta-" .. repo_name)
+			log.step("Core construct found at: zeta-" .. repo_name)
 		end
 	end
 
@@ -401,7 +578,7 @@ function actions._install(name, flags, opts)
 		store = reserve.store_path(name, target_manifest and target_manifest.version)
 	end
 
-	local verb = solve and "will reinstall" or "will provide"
+	local verb = solve and "will reprovide" or "will provide"
 	for _, item in ipairs(plan) do
 		print(("  %s %s-%s"):format(verb, item.name, item.manifest.version))
 	end
@@ -412,14 +589,15 @@ function actions._install(name, flags, opts)
 
 	local confirm_msg
 	if solve and isolate then
-		confirm_msg = ("Rebuild the isolated store at %s (%d packages)?"):format(store, #plan)
+		confirm_msg = ("Reconstruct the isolated store at %s (%d constructs)?"):format(store, #plan)
 	elseif solve then
-		confirm_msg = ("Reprovide the %d direct dependencies of %s?"):format(#plan, name)
+		confirm_msg = ("Solve the %d direct dependencies of %s?"):format(#plan, name)
 	elseif isolate then
-		confirm_msg = ("Provide %d package(s) isolated at %s?"):format(#plan, store)
+		confirm_msg = ("Provide %d construct(s) isolated at %s?"):format(#plan, store)
 	else
-		confirm_msg = ("Provided %d package(s)?"):format(#plan)
+		confirm_msg = ("Provided %d construct(s)?"):format(#plan)
 	end
+	-- Wow fancy words
 	-- The plan is on screen: end resolve here so time spent thinking at the
 	-- prompt is not billed to any phase (the receipt reports work, not you).
 	profile.close()
@@ -496,6 +674,13 @@ function actions._install(name, flags, opts)
 		log.error(tostring(verr))
 		return 1
 	end
+	warn_stage_fit((function()
+		local ps = {}
+		for _, it in ipairs(verify_items) do
+			if it.payload then ps[#ps + 1] = it.payload end
+		end
+		return ps
+	end)())
 	profile.mark("extract")
 
 	-- A store is self-contained: nothing outside references its internals
@@ -530,14 +715,47 @@ function actions._install(name, flags, opts)
 
 	-- Phase 3: Extract and build every package into its staging tree. Nothing
 	-- commits until every package has been staged successfully.
+	--
+	-- Two phases, each with its own counter: the dependencies stage behind one
+	-- row that rewrites in place, then the last archive extracts alone with
+	-- its member listing -- that final listing is the package the user
+	-- actually asked for. --silence still suppresses it.
 	local staged = {}
 	local total = #todo
-	log.step(("Beginning extracts... - [ 0/%d ]"):format(total))
-	for i, item in ipairs(todo) do
-		local m = item.manifest
-		local payload = pre_fetched[item.name]
-		local label = payload and path.basename(payload) or (m.name .. "-" .. m.version)
-		log.step(("Extracting %s... - [ %d/%d ]"):format(label, i, total))
+	local n_deps = total - 1
+
+	if n_deps > 0 then
+		local draw, finish = begin_extract_row("dependencies", n_deps)
+		for i = 1, n_deps do
+			local item = todo[i]
+			local m = item.manifest
+			local payload = pre_fetched[item.name]
+			draw(i, payload and path.basename(payload) or (m.name .. "-" .. m.version))
+			local sok, staged_item = pcall(builder.stage_one, m, {
+				local_dir = m._local_dir,
+				payload = payload,
+				verified = true,
+			})
+			if not sok then
+				finish()
+				for _, s in pairs(staged) do builder.discard_staged(s) end
+				log.error(tostring(staged_item))
+				return 1
+			end
+			staged[item.name] = staged_item
+		end
+		finish(true)
+	end
+
+	-- The last archive: the member listing the user asked for. Guarded --
+	-- `todo` is empty when every plan item was already provided and nothing
+	-- was --force'd, and todo[0] would be nil.
+	if total > 0 then
+		local last = todo[total]
+		local m = last.manifest
+		local payload = pre_fetched[last.name]
+		log.step(("Extracting %s... - [ 1/1 ]"):format(
+			payload and path.basename(payload) or (m.name .. "-" .. m.version)))
 		local sok, staged_item = pcall(builder.stage_one, m, {
 			local_dir = m._local_dir,
 			payload = payload,
@@ -548,7 +766,7 @@ function actions._install(name, flags, opts)
 			log.error(tostring(staged_item))
 			return 1
 		end
-		staged[item.name] = staged_item
+		staged[last.name] = staged_item
 	end
 
 	-- Phase 4: Commit and record each staged package. Up to N provides run at
@@ -624,15 +842,17 @@ end
 -- Shown when a normal (non-isolated) install targets a package that only
 -- exists as an isolated store: the two registries are separate, and the user
 -- must consciously drop the store before a system copy can replace it.
-local ISOLATED_CONFLICT_MSG = ("this package has already been installed as isolated! "
-  .. "you will have to delete the isolated package first before reproviding it normally, "
+local ISOLATED_CONFLICT_MSG = ("this construct has already been installed as isolated! "
+  .. "you will have to delete the isolated construct first before reproviding it normally, "
   .. "if you are sure about this, please use --force flag")
+
+  -- wow stupid design I really gotta rewrite this
 
 function actions.provide(names, flags)
 	for _, raw in ipairs(names) do
 		local name = path.sanitize_name(raw)
 		if not name then
-			log.error("package name is not valid: " .. tostring(raw))
+			log.error("construct name is not valid: " .. tostring(raw))
 			return 1
 		end
 		-- Isolated stores live in their own registry: a normal install of an
@@ -666,7 +886,7 @@ function actions.reprovide(names, flags)
 	for _, raw in ipairs(names) do
 		local name = path.sanitize_name(raw)
 		if not name then
-			log.error("invalid package name: " .. tostring(raw))
+			log.error("invalid construct name: " .. tostring(raw))
 			return 1
 		end
 		if not flags.isolate and not flags.force and db.isolated(name) then
@@ -685,7 +905,7 @@ function actions.reprovide(names, flags)
 	return 0
 end
 
--- -Solve <pkg>: repair a package by reinstalling its direct dependencies.
+-- -Solve repairs a package by reinstalling its direct dependencies.
 -- In system mode the target is left untouched; with --isolate the package's
 -- self-contained store is rebuilt whole, target included.
 function actions.solve(names, flags)
@@ -693,7 +913,7 @@ function actions.solve(names, flags)
 	for _, raw in ipairs(names) do
 		local name = path.sanitize_name(raw)
 		if not name then
-			log.error("invalid package name: " .. tostring(raw))
+			log.error("invalid construct name: " .. tostring(raw))
 			return 1
 		end
 		-- Repair targets an existing install: the two registries are separate,
@@ -703,7 +923,7 @@ function actions.solve(names, flags)
 				if db.kind(name) then
 					log.error(("%s is provided normally -- use -Solve %s without --isolate."):format(name, name))
 				else
-					log.error(("%s is not provded as isolated -- provide it with -Provide %s --isolate first."):format(name, name))
+					log.error(("%s is not provided as isolated -- provide it with -Provide %s --isolate first."):format(name, name))
 				end
 				return 1
 			end
@@ -716,6 +936,15 @@ function actions.solve(names, flags)
 				end
 				return 1
 			end
+		end
+		-- Replacing a base library under a running system floods every
+		-- subsequent shell with "no version information available" --
+		-- ZETA spawns shells for nearly every operation, so it ends up
+		-- drowning in its own output. Isolated solves are exempt: they
+		-- stage into /zeta/reserve/... and never touch the system copy.
+		if not isolate and config.get().do_not_solve[name] then
+			log.error(("%s is on the do-not-solve list; replacing it under a running system destabilises every linked process (use -ReProvide %s if you really mean to)"):format(name, name))
+			return 1
 		end
 		local ok = actions._install(name, {
 			pass = flags.pass,
@@ -734,7 +963,7 @@ function actions.localprovide(names, flags)
 	for _, raw in ipairs(names) do
 		local name = path.sanitize_name(raw)
 		if not name then
-			log.error("invalid package name: " .. tostring(raw))
+			log.error("invalid construct name: " .. tostring(raw))
 			return 1
 		end
 		if not flags.isolate and not flags.force and db.isolated(name) then
@@ -748,7 +977,7 @@ function actions.localprovide(names, flags)
 			end
 			if not flags.force and already then
 				local m = flags.isolate and db.isolated_meta(name) or db.get(name)
-				log.warn(("%s-%s has already been provided, use -ReProvide instead."):format(name, m and m.version or "?"))
+				log.warn(("%s-%s has already been provided, you should -ReProvide instead, maybe you just wanted to check if it was?"):format(name, m and m.version or "?"))
 			else
 				local ok = actions._install(name, flags, { source = "local" })
 				if ok ~= 0 then
@@ -762,7 +991,7 @@ end
 
 local function print_section(title, names)
 	print(title)
-	print(("%-20s %-16s %s"):format("PACKAGE", "VERSION", "DEPS"))
+	print(("%-20s %-16s %s"):format("CONSTRUCT", "VERSION", "DEPS"))
 	print(string.rep("-", 60))
 	for _, n in ipairs(names) do
 		local m = db.get(n)
@@ -773,7 +1002,7 @@ end
 
 local function print_isolated_section(names)
 	print(("ISOLATED (%d)"):format(#names))
-	print(("%-20s %-16s %s"):format("PACKAGE", "VERSION", "STORE"))
+	print(("%-20s %-16s %s"):format("CONSTRUCT", "VERSION", "STORE"))
 	print(string.rep("-", 60))
 	for _, n in ipairs(names) do
 		local m = db.isolated_meta(n)
@@ -786,12 +1015,12 @@ function actions.list()
 	local dependencies = db.list_dependencies()
 	local isolated = db.list_isolated()
 	if #packages == 0 and #dependencies == 0 and #isolated == 0 then
-		log.info("no packages provided")
+		log.info("no constructs provided")
 		return 0
 	end
 	local first = true
 	if #packages > 0 then
-		print_section(("PACKAGES (%d)"):format(#packages), packages)
+		print_section(("CONSTRUCTS (%d)"):format(#packages), packages)
 		first = false
 	end
 	if #dependencies > 0 then
@@ -813,7 +1042,7 @@ function actions.localize(query)
 		return 1
 	end
 	if #matches == 0 then
-		log.info(("no packages match %q"):format(query))
+		log.info(("no constructs match %q"):format(query))
 		return 0
 	end
 
@@ -866,7 +1095,7 @@ end
 function actions.test(name, flags)
 	name = path.sanitize_name(name)
 	if not name then
-		log.error("invalid package name")
+		log.error("invalid construct name")
 		return 1
 	end
 	local base = config.get().local_packages
@@ -924,6 +1153,7 @@ end
 -- System directories that must never be deleted. This is a safety net: even
 -- if a package's file list contains these paths (due to legacy record-keeping),
 -- delete_files will refuse to unlink or rmdir them.
+-- DO NOT DELETE THE PROTECTED DIRECTORIES UNLESS YOU WANT TO DESTROY YO SHI
 
 local PROTECTED_DIRS = {}
 for _, d in ipairs({
@@ -1018,6 +1248,7 @@ local function delete_files(files, pkg_name, owner_index)
   end
 
   -- Final green count; replaces the live line.
+
   if show_progress then
     io.write(("\r\27[K%s - [ deleted %s | %s entries ]\n"):format(
       spinner.next_frame(),
@@ -1027,6 +1258,7 @@ local function delete_files(files, pkg_name, owner_index)
   end
 
   -- Skips and verbose notes in a single write (no per-line redraws).
+
   if #notes > 0 then
     log.detail_batch(notes)
   end
@@ -1040,6 +1272,7 @@ local function delete_files(files, pkg_name, owner_index)
 end
 
 -- Helper: return reverse dependents of `name` that are NOT in `planned`.
+
 local function remaining_dependents(name, planned)
   local out = {}
   for _, d in ipairs(db.reverse_dependents(name)) do
@@ -1056,6 +1289,7 @@ end
 -- two values: the full deletion order (seed then cascaded deps) and a table
 -- of { dep = rd_list } for deps that were skipped because they are still
 -- required by something outside the plan.
+
 local function resolve_cascade(planned, seed)
   local order = {}
   for _, n in ipairs(seed) do
@@ -1086,16 +1320,17 @@ end
 -- is a self-contained environment, so deleting any member (there is only the
 -- target registered anyway) deletes the whole store: profile wrappers first,
 -- then the store directory, then the registry entry.
+
 function actions.delete_isolated(names, flags)
   local targets = {}
   for _, raw in ipairs(names) do
     local name = path.sanitize_name(raw)
     if not name then
-      log.error("package is invalid : " .. tostring(raw))
+      log.error("construct is invalid: " .. tostring(raw))
       return 1
     end
     if not db.isolated(name) then
-      log.error(("%s is not an isolated package."):format(name))
+      log.error(("%s is not an isolated construct."):format(name))
       return 1
     end
     targets[#targets + 1] = name
@@ -1111,7 +1346,7 @@ function actions.delete_isolated(names, flags)
   end
   print("")
 
-  local noun = #plan == 1 and "1 isolated package" or (#plan .. " isolated packages")
+  local noun = #plan == 1 and "1 isolated construct" or (#plan .. " isolated constructs")
   if not confirm(("Delete %s?"):format(noun), flags.pass, " [y/N]", true) then
     log.abort("aborted by user")
     return 0
@@ -1149,7 +1384,7 @@ function actions.delete(names, flags)
   for _, raw in ipairs(names) do
     local name = path.sanitize_name(raw)
     if not name then
-      log.error("package is invalid : " .. tostring(raw))
+      log.error("construct is invalid: " .. tostring(raw))
       return 1
     end
     targets[#targets + 1] = name
@@ -1255,7 +1490,7 @@ function actions.delete(names, flags)
   print("")
 
   -- 7) Single confirmation, default NO.
-  local noun = #plan == 1 and "1 package" or (#plan .. " packages")
+  local noun = #plan == 1 and "1 construct" or (#plan .. " constructs")
   if not confirm(("Delete %s?"):format(noun), flags.pass, " [y/N]", true) then
     log.abort("aborted by user")
     return 0
@@ -1278,7 +1513,7 @@ end
 function actions.transcend(flags)
 	local installed = db.list()
 	if #installed == 0 then
-		log.info("no packages provided")
+		log.info("no constructs provided")
 		return 0
 	end
 
@@ -1300,14 +1535,14 @@ function actions.transcend(flags)
 	end
 
 	if #items == 0 then
-		log.info("no packages have been provided")
+		log.info("no constructs have been provided")
 		return 0
 	end
 
 	-- Marked after the no-op guards above: a run that never checks anything
 	-- records nothing and prints no receipt.
 	profile.mark("resolve")
-	local results = fetch.get_parallel(items, { label = "checking for packages to transcend" })
+	local results = fetch.get_parallel(items, { label = "checking for constructs to transcend" })
 	local manifest_cache = {}
 	for i, result in ipairs(results) do
 		local name = items[i]._name
@@ -1356,7 +1591,7 @@ function actions.transcend(flags)
 	end
 
 	if #upgrades == 0 then
-		log.info("all packages are up to date")
+		log.info("all constructs are up to date")
 		return 0
 	end
 
@@ -1368,7 +1603,7 @@ function actions.transcend(flags)
 
 	-- Same rule as -Provide: the prompt's think time belongs to no phase.
 	profile.close()
-	if not confirm(("Transcend %d package(s)?"):format(#upgrades), flags.pass) then
+	if not confirm(("Transcend %d construct(s)?"):format(#upgrades), flags.pass) then
 		log.abort("aborted by user")
 		return 0
 	end
@@ -1423,18 +1658,51 @@ function actions.transcend(flags)
 		log.error(tostring(verr))
 		return 1
 	end
+	warn_stage_fit((function()
+		local ps = {}
+		for _, it in ipairs(verify_items) do
+			if it.payload then ps[#ps + 1] = it.payload end
+		end
+		return ps
+	end)())
 	profile.mark("extract")
 
 	-- Phase 4: Extract and build every upgrade into its staging tree. Nothing
 	-- commits until every package has been staged successfully.
+	--
+	-- Same shape as the install flow: the upgrades stage behind one row that
+	-- rewrites in place, then the last one extracts with its member listing.
 	local staged = {}
 	local total = #upgrades
-	log.step(("Beginning extracts... - [ 0/%d ]"):format(total))
-	for i, u in ipairs(upgrades) do
-		local payload = pre_fetched[u.name]
-		local label = payload and path.basename(payload) or (u.name .. "-" .. u.to)
-		log.step(("Extracting %s... - [ %d/%d ]"):format(label, i, total))
-		local sok, staged_item = pcall(builder.stage_one, u.manifest, {
+	local n_up = total - 1
+
+	if n_up > 0 then
+		local draw, finish = begin_extract_row("upgrades", n_up)
+		for i = 1, n_up do
+			local u = upgrades[i]
+			local payload = pre_fetched[u.name]
+			draw(i, payload and path.basename(payload) or (u.name .. "-" .. u.to))
+			local sok, staged_item = pcall(builder.stage_one, u.manifest, {
+				payload = payload,
+				verified = true,
+			})
+			if not sok then
+				finish()
+				for _, s in pairs(staged) do builder.discard_staged(s) end
+				log.error(tostring(staged_item))
+				return 1
+			end
+			staged[u.name] = staged_item
+		end
+		finish(true)
+	end
+
+	if total > 0 then
+		local last = upgrades[total]
+		local payload = pre_fetched[last.name]
+		log.step(("Extracting %s... - [ 1/1 ]"):format(
+			payload and path.basename(payload) or (last.name .. "-" .. last.to)))
+		local sok, staged_item = pcall(builder.stage_one, last.manifest, {
 			payload = payload,
 			verified = true,
 		})
@@ -1443,7 +1711,7 @@ function actions.transcend(flags)
 			log.error(tostring(staged_item))
 			return 1
 		end
-		staged[u.name] = staged_item
+		staged[last.name] = staged_item
 	end
 
 	-- Phase 5: Commit and record each staged upgrade. Up to N provides run at
@@ -1472,13 +1740,13 @@ function actions.transcend(flags)
 	for _, u in ipairs(upgrades) do
 		check_libraries(db.files(u.name), config.get().root)
 	end
-	finish(("(transcended %d package(s))"):format(#upgrades))
+	finish(("(transcended %d construct(s))"):format(#upgrades))
 	return 0
 end
 
 function actions.forget(pass)
 	local cfg = config.get()
-	if not confirm("Delete all cached packages?", pass, " [y/N]", true) then
+	if not confirm("Delete all cached constructs?", pass, " [y/N]", true) then
 		log.abort("aborted by user")
 		return 0
 	end

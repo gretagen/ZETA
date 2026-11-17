@@ -26,7 +26,7 @@ local quotes = {
     "Nothing ever doesn't change.",
     "Maybe someday we'll have more maintenance for those..",
     "ZETA package updates? what a funny joke.",
-    "A rare occurence is when ZETA has package updates.",
+    "A rare occurrence is when ZETA has package updates.",
     "A reminder to frequently create generations in case something breaks",
     "I get high on your memory",
     "Feels more outdated than Debian...",
@@ -79,6 +79,7 @@ local quotes = {
     "Fine! Take it off your system! See if I care!",
     "I-it's not like I missed having this package around or anything!",
     "Why are you throwing away what we built together? Are you talking to another package manager behind my back?!",    
+    "noooo don't turn me into a ZETA quote - Silk",
   },
   forget = {
     "Scrubbing logs. History never happened.",
@@ -186,7 +187,7 @@ local quotes = {
     "Tell v1sta he made trees grow.",
     "Tell Serena I got this!",
     "Accept the EULA",
-    "hi -v1sta",
+    "hi - v1sta",
     },
 
   localize = {
@@ -343,7 +344,7 @@ local quotes = {
   	"Houston, we have a problem.",
   	"NOT AGAIN!",
   	"You tried turning it on and off?",
-  	"Task failed succesfully.",
+  	"Task failed successfully.",
   	"Well I tried",
   	"Errors were made. Mistakes happened.",
   	"Don't blame yourself",
@@ -511,6 +512,8 @@ local quotes = {
   	"That went remarkably well.",
   	"You're lucky I'm even here to do your package management.",
     "Finally u did something...",
+    "Energy.",
+    "Now don't fall off the nacelle.",
   },
 
   userno = {
@@ -538,6 +541,8 @@ local quotes = {
   	"As you wish.",
   	"No harm, no foul.",
     "HELL no.",
+    "No = holy egoism",
+    "egoism is when no",
   },
 }
 

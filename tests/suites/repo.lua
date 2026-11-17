@@ -27,9 +27,7 @@ local function write(p, content)
   lib.write(p, content)
 end
 
--- ---------------------------------------------------------------------------
 -- origin_from_url
--- ---------------------------------------------------------------------------
 
 suite:test("origin_from_url maps gretagen artifact repos", function()
   lib.assert_eq(repo.origin_from_url(
@@ -77,9 +75,7 @@ suite:test("origin_from_url falls back for meta, local and unknown hosts", funct
   lib.assert_eq(repo.origin_from_url("https://example.org/dl/x.tar.gz"), "example.org")
 end)
 
--- ---------------------------------------------------------------------------
 -- fetch_index + search
--- ---------------------------------------------------------------------------
 
 suite:test("fetch_index parses the optional origin field", function()
   local dir = lib.tmpdir("repo-idx")
@@ -116,9 +112,7 @@ return {
   lib.assert_nil(matches[2].origin)
 end)
 
--- ---------------------------------------------------------------------------
 -- origins (manifest fallback)
--- ---------------------------------------------------------------------------
 
 suite:test("origins derives labels from each manifest url", function()
   local dir = lib.tmpdir("repo-origins")
@@ -164,9 +158,7 @@ return { name = "alpha", version = "1.0", summary = "a",
 end)
 
 
--- ---------------------------------------------------------------------------
 -- multi-repository resolution
--- ---------------------------------------------------------------------------
 -- Build a repository tree: <root>/packages/<name>/package.lua (+ index.lua).
 local function make_repo(prefix, pkgs, index)
   local root = lib.tmpdir(prefix)

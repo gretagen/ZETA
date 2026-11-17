@@ -22,16 +22,24 @@ local path = require("path")
 local _overrides = {}
 local _cfg
 local _script_dir
-local _config_file = "/etc/zeta/configuration.lua"
+local DEFAULT_CONFIG_FILE = "/etc/zeta/configuration.lua"
+local _config_file = DEFAULT_CONFIG_FILE
 
 function config.setenv(k, v)
   _overrides[k] = v
+end
+
+-- Tests (and only tests) pick which config file is loaded; nil restores the
+-- system default. Mirrors setenv above.
+function config.set_config_file(p)
+  _config_file = p or DEFAULT_CONFIG_FILE
 end
 
 function config.reset()
   _overrides = {}
   _cfg = nil
   _script_dir = nil
+  _config_file = DEFAULT_CONFIG_FILE
 end
 
 local function getenv(k)
@@ -75,6 +83,54 @@ local function load_config_file(filepath)
     return result
   end
   return nil
+end
+
+-- Writable temp dir
+--
+-- <root>/var/tmp/zeta is root-owned on a real system, so the read-only
+-- commands a normal user runs (-Localize resolving origins, and the manifest
+-- prefetch in -Provide before the privilege gate matters) downloaded into a
+-- directory they cannot write. The failures were swallowed downstream: origins
+-- all resolved to "unknown" and each manifest was fetched twice. Probe with
+-- io.open -- no fork, so this costs nothing on the happy path -- and fall back
+-- to a private dir under $TMPDIR that is registered for cleanup on exit.
+local fallback_tmp
+local fallback_hooked = false
+
+local function ensure_dir(dir)
+  local d = io.open(dir, "rb")
+  if d then d:close() return true end   -- already exists: no fork
+  return path.mkdir_p(dir)
+end
+
+local function writable_tmp_dir(dir)
+  if not dir or dir == "" then return dir end
+  ensure_dir(dir)
+  local probe = path.join(dir,
+    (".zeta-write-%d-%d"):format(os.time(), math.random(10000, 99999)))
+  local f = io.open(probe, "wb")
+  if f then
+    f:close()
+    os.remove(probe)
+    return dir
+  end
+
+  -- Not writable: build a private directory once and reuse it for the life of
+  -- this process. Registered exactly once so repeated config.load() calls in
+  -- the test harness do not pile up cleanup hooks.
+  if fallback_tmp then return fallback_tmp end
+  local base = getenv("TMPDIR")
+  if not base or base == "" then base = "/tmp" end
+  fallback_tmp = path.join(base,
+    ("zeta-tmp-%d-%d"):format(os.time(), math.random(10000, 99999)))
+  path.mkdir_p(fallback_tmp)
+  if not fallback_hooked then
+    fallback_hooked = true
+    path.on_cleanup(function()
+      if fallback_tmp then path.run("rm -rf " .. path.quote(fallback_tmp)) end
+    end)
+  end
+  return fallback_tmp
 end
 
 -- Resolve the local package tree. ZETA_LOCAL_PACKAGES is authoritative when
@@ -134,6 +190,55 @@ local function resolve_jobs(cfg_file)
   return 2
 end
 
+-- Packages -Solve must never reinstall. Replacing any of these under a running
+-- system breaks processes already linked against the old build: reinstalling
+-- ncurses, for example, leaves every subsequent shell printing
+-- "no version information available" for the rest of the session -- and ZETA
+-- shells out for nearly everything (path.run/path.popen -> sh -c), so it ends
+-- up flooding its own output.
+--
+-- Deliberately NOT applied to -ReProvide, -Provide --force or -Transcend:
+-- those are updates you asked for, and gating them would freeze glibc/openssl
+-- at their current version forever. Isolated solves are exempt too -- they
+-- stage into /zeta/reserve/... and never touch the system copy.
+--
+-- A `do_not_solve = { ... }` table in the config file REPLACES this list (same
+-- semantics as `repos`), so extending it means copying these names first.
+local DEFAULT_DO_NOT_SOLVE = {
+  -- The C runtime: literally every process links it.
+  glibc = true,
+  -- Terminal library: bash links these directly -- the source of the
+  -- "no version information available" flood.
+  ncurses = true,
+  libtinfo = true,
+  -- What ZETA shells out to on every operation.
+  bash = true,
+  coreutils = true,
+  ["uutils-coreutils"] = true,
+  -- Toolchain: reinstalling mid-run breaks any build in flight.
+  gcc = true,
+  ["gcc-libs"] = true,
+  ["gcc-minimal"] = true,
+  libgcc = true,
+  binutils = true,
+  -- TLS, for ZETA's own curl/wget downloads.
+  openssl = true,
+  -- The other half of bash's link chain.
+  readline = true,
+}
+
+-- Returns the set as { [name] = true }. A config-file list replaces the
+-- defaults; anything non-table (or absent) keeps them.
+local function resolve_do_not_solve(cfg_file)
+  local list = cfg_file and cfg_file.do_not_solve
+  if type(list) ~= "table" then return DEFAULT_DO_NOT_SOLVE end
+  local set = {}
+  for _, n in ipairs(list) do
+    if type(n) == "string" and n ~= "" then set[n] = true end
+  end
+  return set
+end
+
 function config.load(script_dir)
   if script_dir then _script_dir = script_dir end
 
@@ -157,9 +262,10 @@ function config.load(script_dir)
     local_packages = resolve_local_packages(root, under, cfg_file),
     cache_dir = getenv("ZETA_CACHE") or (cfg_file and cfg_file.cache_dir) or under("var/cache/zeta"),
     state_dir = getenv("ZETA_STATE") or (cfg_file and cfg_file.state_dir) or under("var/db/zeta"),
-    tmp_dir = getenv("ZETA_TMP") or (cfg_file and cfg_file.tmp_dir) or under("var/tmp/zeta"),
+    tmp_dir = writable_tmp_dir(getenv("ZETA_TMP") or (cfg_file and cfg_file.tmp_dir) or under("var/tmp/zeta")),
     reserve_dir = getenv("ZETA_RESERVE") or (cfg_file and cfg_file.reserve_dir) or under("zeta/reserve"),
     jobs = resolve_jobs(cfg_file),
+    do_not_solve = resolve_do_not_solve(cfg_file),
     verbose = (getenv("ZETA_VERBOSE") == "1" or getenv("ZETA_VERBOSE") == "true")
               or (cfg_file and cfg_file.verbose == true)
               or false,

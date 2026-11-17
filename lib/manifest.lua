@@ -45,11 +45,11 @@ function manifest.normalize(raw)
 
   local name = raw.name
   if type(name) ~= "string" or not path.sanitize_name(name) then
-    error("manifest: missing or invalid package name", 2)
+    error("manifest: missing or invalid construct name", 2)
   end
   local version = raw.version
   if type(version) ~= "string" or version == "" then
-    error(("manifest: package %q missing version"):format(name), 2)
+    error(("manifest: construct %q missing version"):format(name), 2)
   end
 
   local m = {
@@ -70,7 +70,7 @@ function manifest.normalize(raw)
 
   if raw.sha256 ~= nil then
     if type(raw.sha256) ~= "string" or not raw.sha256:lower():match(HEX64) then
-      error(("manifest: package %q sha256 must be exactly 64 hex characters"):format(name), 2)
+      error(("manifest: construct %q sha256 must be exactly 64 hex characters"):format(name), 2)
     end
     m.sha256 = raw.sha256:lower()
   end
@@ -79,22 +79,22 @@ function manifest.normalize(raw)
   -- so it can never smuggle shell metacharacters or query noise into commands).
   if m.url then
     if not m.url:match("^https?://") and m.url:match("[%s\\]") then
-      error(("manifest: package %q url %q looks unsafe"):format(name, m.url), 2)
+      error(("manifest: construct %q url %q looks unsafe"):format(name, m.url), 2)
     end
   end
 
   -- Dependencies: names or NAME OP VERSION constraints.
   if raw.deps ~= nil then
     if type(raw.deps) ~= "table" then
-      error(("manifest: package %q deps must be a list"):format(name), 2)
+      error(("manifest: construct %q deps must be a list"):format(name), 2)
     end
     for _, d in ipairs(raw.deps) do
       local parsed, err = vercmp.parse_dep(d)
       if not parsed then
-        error(("manifest: package %q: %s"):format(name, err), 2)
+        error(("manifest: construct %q: %s"):format(name, err), 2)
       end
       if parsed.name == name then
-        error(("manifest: package %q depends on itself"):format(name), 2)
+        error(("manifest: construct %q depends on itself"):format(name), 2)
       end
       m.deps[#m.deps + 1] = parsed
     end
@@ -103,20 +103,20 @@ function manifest.normalize(raw)
   -- Optional whitelist of committed paths (relative to the install root).
   if raw.files ~= nil then
     if type(raw.files) ~= "table" then
-      error(("manifest: package %q files must be a list"):format(name), 2)
+      error(("manifest: construct %q files must be a list"):format(name), 2)
     end
     local seen = {}
     local files = {}
     for _, f in ipairs(raw.files) do
       if type(f) ~= "string" or f == "" then
-        error(("manifest: package %q has an empty files entry"):format(name), 2)
+        error(("manifest: construct %q has an empty files entry"):format(name), 2)
       end
       local rel = clean_rel(f)
       if rel == "" or not path.relative_inside(rel) then
-        error(("manifest: package %q files entry %q escapes the root"):format(name, f), 2)
+        error(("manifest: construct %q files entry %q escapes the root"):format(name, f), 2)
       end
       if seen[rel] then
-        error(("manifest: package %q lists %q twice in files"):format(name, rel), 2)
+        error(("manifest: construct %q lists %q twice in files"):format(name, rel), 2)
       end
       seen[rel] = true
       files[#files + 1] = rel
@@ -126,25 +126,25 @@ function manifest.normalize(raw)
 
   if raw.archive ~= nil then
     if type(raw.archive) ~= "table" then
-      error(("manifest: package %q archive must be a table"):format(name), 2)
+      error(("manifest: construct %q archive must be a table"):format(name), 2)
     end
     local strip = raw.archive.strip or 0
     if type(strip) ~= "number" or strip < 0 or strip % 1 ~= 0 then
-      error(("manifest: package %q archive.strip must be a non-negative integer"):format(name), 2)
+      error(("manifest: construct %q archive.strip must be a non-negative integer"):format(name), 2)
     end
     m.archive = { strip = strip }
   end
 
   if raw.install ~= nil then
     if type(raw.install) ~= "function" then
-      error(("manifest: package %q install must be a function"):format(name), 2)
+      error(("manifest: construct %q install must be a function"):format(name), 2)
     end
     m.install = raw.install
   end
 
   if raw.build ~= nil then
     if type(raw.build) ~= "function" then
-      error(("manifest: package %q build must be a function"):format(name), 2)
+      error(("manifest: construct %q build must be a function"):format(name), 2)
     end
     m.build = raw.build
   end
@@ -153,29 +153,29 @@ function manifest.normalize(raw)
   -- so it does not participate in the exactly-one rule below.
   if raw.test ~= nil then
     if type(raw.test) ~= "function" then
-      error(("manifest: package %q test must be a function"):format(name), 2)
+      error(("manifest: construct %q test must be a function"):format(name), 2)
     end
     m.test = raw.test
   end
 
-  -- Exactly one install strategy is allowed — except that an install
+  -- Exactly one install strategy is allowed, except that an install
   -- function may accompany an archive as a post-extract hook (ownership/
   -- mode fixes the staging user cannot express, e.g. the dbus launch
   -- helper root:messagebus 4750).
   local count = (m.archive and 1 or 0) + (m.install and 1 or 0) + (m.build and 1 or 0)
   local hook_ok = m.archive ~= nil and m.install ~= nil and m.build == nil
   if count ~= 1 and not hook_ok then
-    error(("manifest: package %q needs exactly one of archive/install/build"):format(name), 2)
+    error(("manifest: construct %q needs exactly one of archive/install/build"):format(name), 2)
   end
 
   if m.archive and not m.url then
-    error(("manifest: package %q archive mode requires a url"):format(name), 2)
+    error(("manifest: construct %q archive mode requires a url"):format(name), 2)
   end
 
   -- Remote payloads MUST have a checksum; local payloads may omit it (the
   -- maintainer controls the local tree), though Zeta still warns on install.
   if m.url and m.url:match("^https?://") and not m.sha256 then
-    error(("manifest: package %q must declare sha256 for a remote url"):format(name), 2)
+    error(("manifest: construct %q must declare sha256 for a remote url"):format(name), 2)
   end
 
   -- Flag unknown fields (forward compatibility) so typos are visible.
@@ -185,7 +185,7 @@ function manifest.normalize(raw)
       if k == kk then known = true break end
     end
     if not known then
-      log.warn(("manifest: package %q has unknown field %q (ignored)"):format(name, tostring(k)))
+      log.warn(("manifest: construct %q has unknown field %q (ignored)"):format(name, tostring(k)))
     end
   end
 

@@ -1,6 +1,5 @@
 -- zeta.lua -- Zeta package manager entry point.
 --
--- Modules live next to this script (installed layout: /usr/lib/zeta/lib).
 
 local here = arg[0]:match("^(.*)[/\\][^/\\]*$") or "."
 package.path = here .. "/lib/?.lua;" .. package.path

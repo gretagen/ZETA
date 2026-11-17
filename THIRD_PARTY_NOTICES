@@ -8,13 +8,24 @@ https://github.com/Silejonu/bash_loading_animations
 MIT License
 Copyright (c) 2022 Silejonu
 
-Used in: lib/commit.lua (spinner.BRAILLE in lib/spinner.lua)
+Used in: lib/spinner.lua (spinner.METRO, spinner.BRAILLE) and lib/commit.lua
 
-The braille "loading blocks" frame sequence :
+Frame sequences adapted from that project:
+
+  BLA_metro, shortened to a fill-and-restart meter:
+
+ animates the dependency-extraction row (spinner.start_row).
+
+  BLA_box, shown bracketed:
+
+    [┤] [┴] [├] [┬]
+
+  cycles on the progress counters (spinner.BRAILLE / spinner.next_frame).
+  That table was originally BLA_braille_whitespace's
 
     ⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷
 
-is adapted from the BLA_braille_whitespace animation in that project.
+  and kept its name when the frames changed.
 
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

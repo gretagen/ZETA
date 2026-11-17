@@ -195,7 +195,7 @@ local function wrapper_body(store, rel)
 end
 
 -- Create profile wrappers for every binary the package itself owns. `files`
--- is the package's own owned-rel list (dependencies' binaries stay hidden —
+-- is the package's own owned-rel list (dependencies' binaries stay hidden,
 -- they exist only for the store's internals, like nixpkgs).
 -- Returns the list of wrapper paths created.
 function reserve.link_profile(store, files)

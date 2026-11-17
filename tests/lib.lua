@@ -37,9 +37,7 @@ function lib.cleanup()
   os.execute("rm -rf " .. path.quote(lib.tmp_root))
 end
 
--- ---------------------------------------------------------------------------
 -- Suites
--- ---------------------------------------------------------------------------
 
 function lib.new_suite(name)
   local tests = {}
@@ -50,9 +48,7 @@ function lib.new_suite(name)
   return suite
 end
 
--- ---------------------------------------------------------------------------
 -- Assertions (all raise on failure)
--- ---------------------------------------------------------------------------
 
 local function fail(msg)
   error(msg, 3)
@@ -144,9 +140,7 @@ function lib.assert_not_contains(hay, needle, msg)
   end
 end
 
--- ---------------------------------------------------------------------------
 -- Filesystem helpers
--- ---------------------------------------------------------------------------
 
 function lib.write(p, content)
   local f = io.open(p, "wb")
@@ -176,9 +170,7 @@ function lib.is_symlink(p)
   return a == true and b == "exit" and c == 0
 end
 
--- ---------------------------------------------------------------------------
 -- Subprocess (run the real zeta binary with a custom environment)
--- ---------------------------------------------------------------------------
 
 local runs = 0
 

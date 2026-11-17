@@ -26,9 +26,20 @@ local raw_write = io.write
 
 local CLASSIC = { "/", "-", "\\", "|" }
 
--- The braille "loading blocks" cycle, used by progress counters. Adapted from
--- bash_loading_animations' BLA_braille_whitespace (MIT, Silejonu).
-spinner.BRAILLE = { "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷" }
+-- The progress-counter cycle, adapted from bash_loading_animations' BLA_box
+-- (MIT, Silejonu) and shown bracketed. It is still called BRAILLE because it
+-- started out as BLA_braille_whitespace; the frames changed, the name didn't.
+spinner.BRAILLE = { "[┤]", "[┴]", "[├]", "[┬]", }
+
+-- A bracketed meter derived from bash_loading_animations' BLA_metro (MIT,
+-- Silejonu): fills left-to-right, then starts over, on METRO_INTERVAL's tick.
+-- Every frame must be exactly the same width -- a \r redraw does not erase, so
+-- a shorter frame leaves the tail of the previous one on screen. Used by the
+-- dependency-extraction row, which already carries a counter and only needs to
+-- show that work is still happening. Upstream pads with U+00A0; plain spaces
+-- render identically and keep invisible characters out of source.
+spinner.METRO = { "[   ]", "[=  ]", "[== ]", "[===]", }
+local METRO_INTERVAL = 0.1
 
 -- One braille frame per redraw. Progress counters redraw on their own tick
 -- (0.1s in the commit pool, once per entry otherwise), so advancing here is
@@ -43,7 +54,6 @@ end
 
 local tty
 local active = false
-local pidfile
 local pid
 local cleared = false
 
@@ -56,7 +66,8 @@ end
 --   printf '\r<pre><frame><post>'; sleep <interval>
 -- The format is a fixed literal, so pre/post/frame can never be read as
 -- conversion specifications -- every % that reaches printf stays a literal.
--- Exported for tests; start() runs it with `&` and remembers the pid.
+-- Exported for tests; build_script()/start_row() run it with `&` and remember
+-- the pid.
 function spinner.build_row(pre, post, frames, interval)
   local script = "trap 'kill 0; exit 130' INT; while :; do "
   for _, f in ipairs(frames) do
@@ -93,49 +104,56 @@ function spinner.enabled()
   return is_tty()
 end
 
--- Start animating `msg` on its own line. No-op when stdout is not a terminal.
-function spinner.start(msg)
+-- Spawn a background loop that redraws `script` forever. No-op when stdout is
+-- not a terminal or another row is already live.
+local function launch_script(script)
   if not is_tty() or active then return end
   active = true
   cleared = false
-  pidfile = path.join("/tmp", "zeta-spinner-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999)))
-  path.run(spinner.build_script(msg) .. " & echo $! > " .. path.quote(pidfile))
-  local f = io.open(pidfile, "rb")
-  if f then
-    pid = tonumber(f:read("*a")) or nil
-    f:close()
-  end
+  -- spawn_bg hands the loop its own process group, so the cleanup hook takes
+  -- the whole row loop with it instead of orphaning it; it also owns the
+  -- pidfile, which it consumes while reading. The row is a shell fragment, so
+  -- it goes in via `shell -c` rather than being exec'd directly.
+  pid = path.spawn_bg(path.shell .. " -c " .. path.quote(script),
+    path.join("/tmp", "zeta-spinner-" .. tostring(os.time()) .. "-" .. tostring(math.random(10000, 99999))))
   path.on_cleanup(spinner._cleanup_hook)
 end
 
--- Stop animating and clear the spinner line.
-function spinner.stop()
+-- Start animating `msg` on its own indented line, `  <msg> <frame>`. No-op
+-- when stdout is not a terminal.
+function spinner.start(msg)
+  launch_script(spinner.build_script(msg))
+end
+
+-- Start a row whose prefix and suffix are used verbatim, for progress lines
+-- that carry their own lead-in instead of the indented spinner layout. The
+-- meter sits wherever the two put it, and runs at BLA_metro's authored 0.2s.
+function spinner.start_row(pre, post)
+  launch_script(spinner.build_row(pre, post, spinner.METRO, METRO_INTERVAL))
+end
+
+-- Stop animating and clear the spinner line. With `keep_row`, the loop is
+-- killed but whatever it last drew stays put and is newline-terminated --
+-- used by rows that must survive as a record of what just finished.
+function spinner.stop(keep_row)
   if not active then return end
   active = false
   cleared = false
   path.remove_cleanup(spinner._cleanup_hook)
-  if pid then
-    path.run("kill " .. tostring(pid) .. " 2>/dev/null")
-    pid = nil
+  path.kill_tree(pid)
+  pid = nil
+  if keep_row then
+    raw_write("\n")
+  else
+    raw_write("\r\27[K")
   end
-  if pidfile then
-    os.remove(pidfile)
-    pidfile = nil
-  end
-  raw_write("\r\27[K")
   io.flush()
 end
 
 -- Internal cleanup hook: kills the spinner process tree on signal.
 function spinner._cleanup_hook()
-  if pid then
-    path.run("kill " .. tostring(pid) .. " 2>/dev/null")
-    pid = nil
-  end
-  if pidfile then
-    os.remove(pidfile)
-    pidfile = nil
-  end
+  path.kill_tree(pid)
+  pid = nil
 end
 
 return spinner
