@@ -11,6 +11,32 @@ local path = require("path")
 local config = require("config")
 local actions = require("actions")
 local quotes = require("quotes")
+local spinner = require("spinner")
+local profile = require("profile")
+
+-- Own the terminal. A live spinner row is drawn with \r and no trailing
+-- newline, so output that lands on it glues to it ("Resolving dependencies /
+-- .   dependency ..."). Suspend the row before every write and re-arm after;
+-- the background loop redraws itself on its next tick.
+--
+-- spinner captured io.write when it was loaded above, so its own row writes
+-- bypass this wrapper and cannot re-enter it. stderr is left alone: the
+-- spinner is always stopped before any warn/error path runs.
+local _print, _write = print, io.write
+
+print = function(...)
+  spinner.suspend()
+  local r = _print(...)
+  spinner.resume()
+  return r
+end
+
+io.write = function(...)
+  spinner.suspend()
+  local r = _write(...)
+  spinner.resume()
+  return r
+end
 
 -- arg[0] is the script name; everything after it is user input.
 local args = {}
@@ -54,6 +80,15 @@ local dispatch = {
 local ok, code = pcall(function()
   return dispatch[parsed.command](parsed.args, parsed.flags)
 end)
+
+-- One-line phase-timing receipt for the install pipeline (lib/profile.lua).
+-- Only -Provide and -Transcend report; a failed run and commands that never
+-- mark phases print nothing (profile.report() returns nil when unmarked).
+local TIMED_COMMANDS = { provide = true, transcend = true }
+if ok and (code == nil or code == 0) and TIMED_COMMANDS[parsed.command] then
+  local report = profile.report()
+  if report then log.info("timings: " .. report) end
+end
 
 -- Kill orphaned background processes (spinner, download scripts) on exit.
 path.run_cleanup()
