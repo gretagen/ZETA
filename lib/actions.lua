@@ -1601,11 +1601,27 @@ function actions.transcend(flags)
 	end
 	print("")
 
+	-- Description only: chronos already timestamps the generation itself and
+	-- `chronos list` shows it in the DATE column. Without chronos the transcend
+	-- still runs -- there is just no rollback point.
+	local desc = ("pre-transcending of %d construct(s)"):format(#upgrades)
+
 	-- Same rule as -Provide: the prompt's think time belongs to no phase.
 	profile.close()
 	if not confirm(("Transcend %d construct(s)?"):format(#upgrades), flags.pass) then
 		log.abort("aborted by user")
 		return 0
+	end
+
+	-- We create a generation before a transcend
+	-- more atomic, more safe
+	-- Only when installing into the real system root: snapshotting the live
+	-- root is meaningless for a test/alternate ZETA_ROOT -- and dangerous if
+	-- the test suite happens to run as root (it would touch /boot/limine.conf).
+	if cfg.root == "/" then
+		if not path.run("chronos create " .. path.quote(desc)) then
+			log.warn("ZETA could not create a chronos generation, transcending without a rollback point.")
+		end
 	end
 	profile.mark("fetch")
 

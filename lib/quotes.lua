@@ -320,6 +320,7 @@ local quotes = {
     "CONTAINMENT BREACH! WARNING! CONTAINMENT BREACH!",
     "+ENRAGED",
   	"Oh hell naw",
+  	"WE DO NOT BREAK USERSPACE!",
   	"Big V isn't happy about this.",
   	"This is what happens when you confuse Zerene with Haliade",
   	"I think you know what the problem is just as well as I do.",
@@ -389,7 +390,6 @@ local quotes = {
   	"Bailing out, you're on your own now. Good luck.",
     "yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep code rot yep yep yep yep yep yep yep yep may god save us all yep yep yep yep yep yep yep yep",
     "POV: When your barber says sorry",
-  	
   },
 
   warn = {
