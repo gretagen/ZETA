@@ -69,9 +69,13 @@ Commands:
                           dependencies (the construct itself is left intact).
                           With --isolate, rebuild its whole reserved store
                           instead.
-  -Transcend              Transcend all installed constructs to their latest versions
+  -Transcend              Transcend all provided constructs to their latest versions
   -Delete <pkg>...        Delete constructs (see --with-deps)
-  -List                   List installed constructs and dependencies
+  -List <registery>       List installed constructs and dependencies
+                          For listing, you must provide precisely 1 registery
+                          supported registeries : constructs, depends, isolated
+                          To show all registeries at once, use "all"
+
   -Localize <query>       Search the index of constructs
   -Test <pkg>             Verify a construct offline WITHOUT installing it
   -Forget                 Delete all cached constructs
@@ -991,7 +995,7 @@ end
 
 local function print_section(title, names)
 	print(title)
-	print(("%-20s %-16s %s"):format("CONSTRUCT", "VERSION", "DEPS"))
+	print(("%-20s %-16s %s"):format("CONSTRUCT", "VERSION", "DEPENDENTS"))
 	print(string.rep("-", 60))
 	for _, n in ipairs(names) do
 		local m = db.get(n)
@@ -1002,7 +1006,7 @@ end
 
 local function print_isolated_section(names)
 	print(("ISOLATED (%d)"):format(#names))
-	print(("%-20s %-16s %s"):format("CONSTRUCT", "VERSION", "STORE"))
+	print(("%-20s %-16s %s"):format("CONSTRUCT", "VERSION", "RESERVE"))
 	print(string.rep("-", 60))
 	for _, n in ipairs(names) do
 		local m = db.isolated_meta(n)
@@ -1010,27 +1014,45 @@ local function print_isolated_section(names)
 	end
 end
 
-function actions.list()
-	local packages = db.list_packages()
-	local dependencies = db.list_dependencies()
-	local isolated = db.list_isolated()
-	if #packages == 0 and #dependencies == 0 and #isolated == 0 then
-		log.info("no constructs provided")
+-- -List <registry> action: constructs | depends | isolated | all, they are all
+-- resolved by cli.parse against  LIST_CANON (in lib/cli.lua). A named
+-- registry always prints its header, even at (0), so the command answers
+-- visibly; `all` keeps the historic behavior of skipping empty sections.
+function actions.list(args)
+	local which = args[1]
+	if which == "all" then
+		local packages = db.list_packages()
+		local dependencies = db.list_dependencies()
+		local isolated = db.list_isolated()
+		if #packages == 0 and #dependencies == 0 and #isolated == 0 then
+			log.info("no constructs provided")
+			return 0
+		end
+		local first = true
+		if #packages > 0 then
+			print_section(("CONSTRUCTS (%d)"):format(#packages), packages)
+			first = false
+		end
+		if #dependencies > 0 then
+			if not first then print("") end
+			print_section(("DEPENDENCIES (%d)"):format(#dependencies), dependencies)
+			first = false
+		end
+		if #isolated > 0 then
+			if not first then print("") end
+			print_isolated_section(isolated)
+		end
 		return 0
 	end
-	local first = true
-	if #packages > 0 then
-		print_section(("CONSTRUCTS (%d)"):format(#packages), packages)
-		first = false
-	end
-	if #dependencies > 0 then
-		if not first then print("") end
-		print_section(("DEPENDENCIES (%d)"):format(#dependencies), dependencies)
-		first = false
-	end
-	if #isolated > 0 then
-		if not first then print("") end
-		print_isolated_section(isolated)
+	if which == "constructs" then
+		local names = db.list_packages()
+		print_section(("CONSTRUCTS (%d)"):format(#names), names)
+	elseif which == "depends" then
+		local names = db.list_dependencies()
+		print_section(("DEPENDENCIES (%d)"):format(#names), names)
+	else -- "isolated"; cli.parse guarantees the value is Ubuntu's company (get it, cuz of canonical?)
+		local names = db.list_isolated()
+		print_isolated_section(names)
 	end
 	return 0
 end

@@ -28,11 +28,12 @@ local COMMANDS = {
   help = true,
 }
 
--- Number of positional arguments each command requires exactly.
+-- Number of positional arguments each command requires exactly. -List is not there,
+-- as it takes one registery name and validates it seperately.
 local ARITY = {
   localize = 1,
   test = 1,
-  list = 0,
+  list = 1,
   transcend = 0,
   forget = 0,
   help = 0,
@@ -46,6 +47,21 @@ local MIN_ARGS = {
   solve = 1,
   delete = 1,
 }
+
+-- -List registries: canonical name = accepted aliases. parse() rewrites
+-- args[1] to the canonical name, and actions.list() dispatches on exactly
+-- those four -- keep both sides in sync.
+local LIST_CANON = {
+  all = "all",
+  constructs = "constructs",
+  packages = "constructs",
+  depends = "depends",
+  deps = "depends",
+  dependencies = "depends",
+  isolated = "wisolated",
+  reserve = "isolated",
+}
+local LIST_NAMES = "constructs, depends, isolated, all"
 
 -- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps, detail, silence, no_quote, isolate, jobs, dir, files_path, version } }.
 -- Returns nil, errmsg on any parse problem.
@@ -117,6 +133,24 @@ function cli.parse(args)
 
   if not cmd then
     return nil, "no command specified."
+  end
+
+  -- The -List always names a registery
+  -- This change is pretty sudden from the past versions, which is why instead of a generic error,
+  -- it gets it's own error message.
+  -- Reason why -list can not be ran by itself anymore is to make zeta output's more precise when listing.
+  -- Anyway, the name is validated right here, so the failure goes through zeta.lua's parse-error path
+  if cmd == "list" then
+    if #pos == 0 then
+      return nil, "To list means to specify a registry."
+    elseif #pos > 1 then
+      return nil, ("-List takes exactly one registry, sorry! (%s)."):format(LIST_NAMES)
+    end
+    local canon = LIST_CANON[pos[1]:lower()]
+    if not canon then
+      return nil, ("The registry %q is part of your delusion"):format(pos[1], LIST_NAMES)
+    end
+    pos[1] = canon
   end
 
   local want = ARITY[cmd]

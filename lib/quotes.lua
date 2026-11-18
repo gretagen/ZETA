@@ -3,7 +3,7 @@
 -- these are quotes for flags or states
 -- you can disable quotes using the --no-quote flag or in the config
 
-math.randomseed(os.time()) -- Needed for quotes to be randomized
+math.randomseed(os.time()) -- Needed for quotes to be randomized (I'm sure you know that if you know how to read Lua code)
 
 local quotes = {
   transcend = {
@@ -147,7 +147,6 @@ local quotes = {
     "Don't forget to take your meds if you need them!",
     "We all have to try new things.",
     "I've been waiting in your path variable all day, just hoping you'd call me.",
-    "If it's not there just subspace-merge",
     "We'll get it all someday",
     "Any delivery service wouldn't ship that fast",
     "Fast and noisy, like a wind turbine.",
@@ -193,7 +192,6 @@ local quotes = {
   localize = {
     "Searching the local repository. I am completely confident in my findings.",
     "These aren't the packages you are looking for.",
-    "If it's not there just subspace-merge.",
     "Not all those who wander are lost.",
     "To find yourself, think for yourself.",
     "May your search yield more than just error logs.",
@@ -201,24 +199,18 @@ local quotes = {
     "Querying the cosmos (or at least the package repository)...",
     "Seeking, and hopefully finding.",
     "Scanning the horizon for matches.",
+    "What am I? Google?"
     "Let's see what turns up when we shine a light here.",
     "But you found me, congratulations, was it worth it?",
     "To seek is to admit you don't already know everything.",
     "Looking into the abyss, hoping it returns a package name.",
     "Let's see if what you're looking for actually exists.",
-    "Curiosity didn't kill the cat; it just made it run -Localize.",
+    "Curiosity didn't kill the cat; it just made it run zeta -Localize.",
     "Illuminating the dark corners of the repository...",
     "Because scrolling blindly is a thing of the past.",
     "You're so helpless without me guiding your search queries...",
     "No matter where your packages are, dependencies are always connected.",
     "The boundary between local and remote is an illusion.",
-     "To list is to bring light to the invisible.",
-     "Grocery list, except it's already in the house.",
-     "D-don't stare at my package inventory like that, creep!",
-     "Here! This is all your messy digital clutter. Satisfied now?",
-     "Hmph, looking over your installed apps again? You really have no life, do you?",
-     "Fine, I'll print the list. Read it quickly and leave me alone!",
-     "An array of life. Blooming.",
   },
 
   help = {
@@ -262,6 +254,7 @@ local quotes = {
    "Even trees grow faster than this...",
    "Even Avianca's Wi-Fi is Faster!",
    "Temu ships faster than this..",
+   "Hmphh... I'm so bored!!",
    
   },
 
@@ -390,7 +383,7 @@ local quotes = {
   	"Bailing out, you're on your own now. Good luck.",
     "yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep yep code rot yep yep yep yep yep yep yep yep may god save us all yep yep yep yep yep yep yep yep",
     "POV: When your barber says sorry",
-  },
+   },
 
   warn = {
     "To notify :",

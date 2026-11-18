@@ -21,14 +21,30 @@ suite:test("every documented command parses", function()
     local p = parse({ c, "pkg" })
     lib.assert_eq(p.args[1], "pkg")
   end
-  lib.assert_eq(parse({ "-List" }).command, "list")
+  lib.assert_eq(parse({ "-List", "all" }).command, "list")
   lib.assert_eq(parse({ "-Help" }).command, "help")
 end)
 
 suite:test("commands are case-insensitive", function()
   lib.assert_eq(parse({ "-provide", "x" }).command, "provide")
   lib.assert_eq(parse({ "-PROVIDE", "x" }).command, "provide")
-  lib.assert_eq(parse({ "-l" .. "ist" }).command, "list")
+  lib.assert_eq(parse({ "-l" .. "ist", "all" }).command, "list")
+end)
+
+suite:test("-List requires one known registry", function()
+  local p, err = cli.parse({ "-List" })
+  lib.assert_nil(p)
+  lib.assert_contains(err, "specify a registry")
+
+  bad({ "-List", "bogus" })
+  bad({ "-List", "constructs", "depends" })
+
+  lib.assert_eq(parse({ "-List", "all" }).args, { "all" })
+  lib.assert_eq(parse({ "-List", "constructs" }).args, { "constructs" })
+  lib.assert_eq(parse({ "-List", "packages" }).args, { "constructs" })
+  lib.assert_eq(parse({ "-List", "deps" }).args, { "depends" })
+  lib.assert_eq(parse({ "-List", "DEPENDENCIES" }).args, { "depends" })
+  lib.assert_eq(parse({ "-List", "reserve" }).args, { "isolated" })
 end)
 
 suite:test("-h is an alias for help", function()
