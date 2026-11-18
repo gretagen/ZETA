@@ -29,7 +29,7 @@ local CLASSIC = { "/", "-", "\\", "|" }
 -- The progress-counter cycle, adapted from bash_loading_animations' BLA_box
 -- (MIT, Silejonu) and shown bracketed. It is still called BRAILLE because it
 -- started out as BLA_braille_whitespace; the frames changed, the name didn't.
-spinner.BRAILLE = { "[┤]", "[┴]", "[├]", "[┬]", }
+spinner.BRAILLE = { "󰵕", "󰵑", "󰵌", }
 
 -- A bracketed meter derived from bash_loading_animations' BLA_metro (MIT,
 -- Silejonu): fills left-to-right, then starts over, on METRO_INTERVAL's tick.
