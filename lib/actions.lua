@@ -62,16 +62,16 @@ zeta | construct management system of Haliade
 Usage: zeta <command> [arguments] [flags]
 
 Commands:
-  -Provide <pkg>...       Provide constructs and their dependencies from the remote repository
+  -Provide <pkg>...       Provide constructs and their dependents from the remote repository
   -ReProvide <pkg>...     Reinstall constructs even if they are already installed
   -LocalProvide <pkg>...  Install constructs from the local /packages tree
-  -Solve <pkg>...         Repair a construct by reinstalling its direct
-                          dependencies (the construct itself is left intact).
+  -Solve <pkg>...         Repair a construct by reproviding its direct
+                          dependents (the construct itself is left intact).
                           With --isolate, rebuild its whole reserved store
                           instead.
   -Transcend              Transcend all provided constructs to their latest versions
   -Delete <pkg>...        Delete constructs (see --with-deps)
-  -List <registery>       List installed constructs and dependencies
+  -List <registry>        List installed constructs and dependents
                           For listing, you must provide precisely 1 registery
                           supported registeries : constructs, depends, isolated
                           To show all registeries at once, use "all"
@@ -84,7 +84,7 @@ Commands:
 Flags:
   --pass                  Proceed immediately with an action
   --force                 Force an operation
-  --with-deps             With -Delete, also delete dependencies that are no longer
+  --with-deps             Paired with -Delete, also delete dependents that are no longer
                           required by any installed construct (never deletes constructs
                           installed explicitly)
   --silence               Suppress tar extraction file listings
@@ -505,7 +505,7 @@ function actions._install(name, flags, opts)
 		return fetch_manifest(n)
 	end
 
-	spinner.start("Resolving dependencies")
+	spinner.start("Resolving dependents")
 	local target_manifest
 	local ok, plan
 	if direct_only then
@@ -531,7 +531,7 @@ function actions._install(name, flags, opts)
 				else
 					local m = cached_fetch_manifest(dep.name)
 					if not m then
-						ok, plan = false, ("can not resolve dependency %q"):format(dep.name)
+						ok, plan = false, ("can not resolve dependent %q"):format(dep.name)
 						break
 					end
 					plan[#plan + 1] = { name = dep.name, manifest = m }
@@ -561,7 +561,7 @@ function actions._install(name, flags, opts)
 	end
 	if #plan == 0 then
 		if solve then
-			log.info(("no dependencies to reprovide for %s"):format(name))
+			log.info(("no dependents to reprovide for %s"):format(name))
 		end
 		return 0
 	end
@@ -595,7 +595,7 @@ function actions._install(name, flags, opts)
 	if solve and isolate then
 		confirm_msg = ("Reconstruct the isolated store at %s (%d constructs)?"):format(store, #plan)
 	elseif solve then
-		confirm_msg = ("Solve the %d direct dependencies of %s?"):format(#plan, name)
+		confirm_msg = ("Solve the %d direct dependents of %s?"):format(#plan, name)
 	elseif isolate then
 		confirm_msg = ("Provide %d construct(s) isolated at %s?"):format(#plan, store)
 	else
@@ -729,7 +729,7 @@ function actions._install(name, flags, opts)
 	local n_deps = total - 1
 
 	if n_deps > 0 then
-		local draw, finish = begin_extract_row("dependencies", n_deps)
+		local draw, finish = begin_extract_row("dependents", n_deps)
 		for i = 1, n_deps do
 			local item = todo[i]
 			local m = item.manifest
@@ -846,7 +846,7 @@ end
 -- Shown when a normal (non-isolated) install targets a package that only
 -- exists as an isolated store: the two registries are separate, and the user
 -- must consciously drop the store before a system copy can replace it.
-local ISOLATED_CONFLICT_MSG = ("this construct has already been installed as isolated! "
+local ISOLATED_CONFLICT_MSG = ("this construct has already been provided as isolated! "
   .. "you will have to delete the isolated construct first before reproviding it normally, "
   .. "if you are sure about this, please use --force flag")
 
@@ -874,7 +874,7 @@ function actions.provide(names, flags)
 			end
 			if not flags.force and already then
 				local m = flags.isolate and db.isolated_meta(name) or db.get(name)
-				log.warn(("%s-%s has already been provided -- use -ReProvide instead"):format(name, m and m.version or "?"))
+				log.warn(("%s-%s has already been provided -- use -ReProvide instead, maybe you wanted to check if it was?"):format(name, m and m.version or "?"))
 			else
 				local ok = actions._install(name, flags, { source = "remote" })
 				if ok ~= 0 then
@@ -993,14 +993,25 @@ function actions.localprovide(names, flags)
 	return 0
 end
 
+-- A meta list (deps or dependents) as a table cell: names joined by spaces,
+-- "-" when there is nothing to show. Both lists are stored as plain names
+-- (db.record), so no shaping is needed.
+local function cell(list)
+	return (list and #list > 0) and table.concat(list, " ") or "-"
+end
+
+-- Rows in both directions: DEPENDENTS is what the entry needs (its
+-- dependencies), ASSIGNED TO is what needs it (its dependents) -- either
+-- column alone hides half the picture, so both are always printed. The rule
+-- is sized from the header so it can never drift.
 local function print_section(title, names)
 	print(title)
-	print(("%-20s %-16s %s"):format("CONSTRUCT", "VERSION", "DEPENDENTS"))
-	print(string.rep("-", 60))
+	local header = ("%-20s %-16s %-24s %s"):format("CONSTRUCT", "VERSION", "DEPENDENTS", "ASSIGNED TO")
+	print(header)
+	print(string.rep("-", #header))
 	for _, n in ipairs(names) do
 		local m = db.get(n)
-		local deps_str = (m and m.deps and #m.deps > 0) and table.concat(m.deps, " ") or "-"
-		print(("%-20s %-16s %s"):format(n, m and m.version or "?", deps_str))
+		print(("%-20s %-16s %-24s %s"):format(n, m and m.version or "?", cell(m and m.deps), cell(m and m.dependents)))
 	end
 end
 
@@ -1035,7 +1046,7 @@ function actions.list(args)
 		end
 		if #dependencies > 0 then
 			if not first then print("") end
-			print_section(("DEPENDENCIES (%d)"):format(#dependencies), dependencies)
+			print_section(("DEPENDENTS (%d)"):format(#dependencies), dependencies)
 			first = false
 		end
 		if #isolated > 0 then
@@ -1049,7 +1060,7 @@ function actions.list(args)
 		print_section(("CONSTRUCTS (%d)"):format(#names), names)
 	elseif which == "depends" then
 		local names = db.list_dependencies()
-		print_section(("DEPENDENCIES (%d)"):format(#names), names)
+		print_section(("DEPENDENTS (%d)"):format(#names), names)
 	else -- "isolated"; cli.parse guarantees the value is Ubuntu's company (get it, cuz of canonical?)
 		local names = db.list_isolated()
 		print_isolated_section(names)
@@ -1094,14 +1105,15 @@ function actions.localize(query)
 	for _, m in ipairs(matches) do
 		rows[#rows + 1] = { m.name, m.version or "?", m.origin or "unknown", m.summary or "" }
 	end
-	local widths = { #"PACKAGE", #"VERSION", #"REPO" }
+
+	local widths = { #"CONSTRUCT", #"VERSION", #"REPOSITORY" }
 	for _, r in ipairs(rows) do
 		for i = 1, 3 do
 			if #r[i] > widths[i] then widths[i] = #r[i] end
 		end
 	end
 	local fmt = ("%%-%ds %%-%ds %%-%ds %%s"):format(widths[1], widths[2], widths[3])
-	local header = fmt:format("PACKAGE", "VERSION", "REPO", "SUMMARY")
+	local header = fmt:format("CONSTRUCT", "VERSION", "REPOSITORY", "SUMMARY")
 	print(header)
 	print(string.rep("-", math.max(#header, 84)))
 	for _, r in ipairs(rows) do
@@ -1183,7 +1195,7 @@ for _, d in ipairs({
   "/usr", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64", "/usr/share",
   "/etc", "/var", "/tmp", "/opt",
   "/dev", "/proc", "/sys", "/run",
-  "/home", "/root",
+  "/home", "/root", "/subspace", "/systems",
 }) do
   PROTECTED_DIRS[d] = true
 end

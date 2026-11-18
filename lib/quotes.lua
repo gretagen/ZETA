@@ -199,7 +199,7 @@ local quotes = {
     "Querying the cosmos (or at least the package repository)...",
     "Seeking, and hopefully finding.",
     "Scanning the horizon for matches.",
-    "What am I? Google?"
+    "What am I? Google?",
     "Let's see what turns up when we shine a light here.",
     "But you found me, congratulations, was it worth it?",
     "To seek is to admit you don't already know everything.",
