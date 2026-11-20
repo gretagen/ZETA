@@ -3,7 +3,7 @@
 -- Command tokens start with a single dash and match the documented forms
 -- (-Provide, -LocalProvide, -ReProvide, -Solve, -Delete, -List, -Localize,
 -- -Help). Match is case-insensitive so -provide and -PROVIDE also work. Flags
--- start with a double dash (--pass, --force, --with-deps, --detail,
+-- start with a double dash (--pass, --force, --detail,
 -- --silence, --jobs, --help).
 -- Install/delete commands accept one or more construct names.
 
@@ -63,12 +63,12 @@ local LIST_CANON = {
 }
 local LIST_NAMES = "constructs, depends, isolated, all"
 
--- Returns { command = <string>, args = {..}, flags = { pass, force, with_deps, detail, silence, no_quote, isolate, jobs, dir, files_path, version } }.
+-- Returns { command = <string>, args = {..}, flags = { pass, force, detail, silence, no_quote, isolate, jobs, dir, files_path, version } }.
 -- Returns nil, errmsg on any parse problem.
 function cli.parse(args)
   local cmd
   local pos = {}
-  local flags = { pass = false, force = false, with_deps = false, detail = false, silence = false, no_quote = false, isolate = false, jobs = nil }
+  local flags = { pass = false, force = false, detail = false, silence = false, no_quote = false, isolate = false, jobs = nil }
 
   local i = 1
   while i <= #args do
@@ -79,8 +79,6 @@ function cli.parse(args)
         flags.pass = true
       elseif key == "force" then
         flags.force = true
-      elseif key == "with-deps" then
-        flags.with_deps = true
       elseif key == "detail" then
         flags.detail = true
       elseif key == "silence" then

@@ -14,7 +14,7 @@
 --
 -- A dependency's meta.lua also carries `dependents`, the list of installed
 -- entries that depend on it. That back-reference is what lets -Delete decide
--- whether an entry is still required and lets --with-deps cascade safely.
+-- whether an entry is still required and lets the cascade safely.
 --
 -- Legacy databases (entries directly under <state_dir>/<name>) are migrated
 -- lazily, once per state dir, into the packages/ registry.

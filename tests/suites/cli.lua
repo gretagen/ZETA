@@ -95,10 +95,8 @@ suite:test("-Solve is a command and pairs with --isolate", function()
   lib.assert_eq(p.args[1], "app")
 end)
 
-suite:test("--with-deps is recorded", function()
-  local p = parse({ "-Delete", "app", "--with-deps" })
-  lib.assert_true(p.flags.with_deps)
-  lib.assert_eq(p.command, "delete")
+suite:test("--with-deps is GONE", function()
+  bad({ "-Delete", "app", "--with-deps" })
 end)
 
 suite:test("--detail is recorded", function()

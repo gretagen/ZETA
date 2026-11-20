@@ -5,8 +5,8 @@
 -- Install/delete commands accept one or more package names and operate on
 -- each one in turn, stopping at the first hard failure. Installed state is
 -- split into explicit "packages" and auto-installed "dependencies"; -Delete
--- warns about dependents and --with-deps cascades into orphaned
--- dependencies.
+-- warns about dependents and always cascades into orphaned dependencies
+-- (nothing still required by another construct is ever touched).
 
 local actions = {}
 
@@ -70,7 +70,7 @@ Commands:
                           With --isolate, rebuild its whole reserved store
                           instead.
   -Transcend              Transcend all provided constructs to their latest versions
-  -Delete <pkg>...        Delete constructs (see --with-deps)
+  -Delete <pkg>...        Delete constructs, dependents cascade with them
   -List <registry>        List installed constructs and dependents
                           For listing, you must provide precisely 1 registery
                           supported registeries : constructs, depends, isolated
@@ -84,9 +84,7 @@ Commands:
 Flags:
   --pass                  Proceed immediately with an action
   --force                 Force an operation
-  --with-deps             Paired with -Delete, also delete dependents that are no longer
-                          required by any installed construct (never deletes constructs
-                          installed explicitly)
+
   --silence               Suppress tar extraction file listings
   --isolate               With -Provide/-ReProvide/-LocalProvide: install into a
                           self-contained store at <root>/zeta/reserve/<pkg>-<version>
@@ -1335,7 +1333,7 @@ local function resolve_cascade(planned, seed)
     local n = order[i]
     local m = db.get(n)
     for _, dep in ipairs(m and m.deps or {}) do
-      if db.kind(dep) == "dependency" and not planned[dep] then
+    if db.kind(dep) == "dependency" and dep ~= "base" and not planned[dep] then
         local rd = remaining_dependents(dep, planned)
         if #rd == 0 then
           planned[dep] = true
@@ -1349,7 +1347,6 @@ local function resolve_cascade(planned, seed)
   end
   return order, skip
 end
-
 -- -Delete --isolate: delete isolated stores wholesale. Each isolated package
 -- is a self-contained environment, so deleting any member (there is only the
 -- target registered anyway) deletes the whole store: profile wrappers first,
@@ -1410,6 +1407,22 @@ function actions.delete_isolated(names, flags)
 end
 
 function actions.delete(names, flags)
+  -- More useless code.
+  -- this prevents base from being deleted via ZETA, simply because it's a useless idea
+  -- who am I to tell you this anyway
+  -- if you really wanna delete base just run rm -rf / --no-preserve-root
+  for _, raw in ipairs(names) do
+    local name = path.sanitize_name(raw)
+    if name and name:lower() == "base" then
+      log.error("You can't just remove the base, that's literally just the base")
+      return 1
+    end
+  end
+
+  if flags.isolate then
+    return actions.delete_isolated(names, flags)
+  end
+
   if flags.isolate then
     return actions.delete_isolated(names, flags)
   end
@@ -1452,13 +1465,12 @@ function actions.delete(names, flags)
     end
   end
 
-  -- 4) Cascade into orphaned dependencies if --with-deps.
-  local delete_order = targets
-  local skipped = {}
-  if flags.with_deps then
-    delete_order, skipped = resolve_cascade(planned, targets)
-  end
-
+  -- 4) Cascade into orphaned dependencies: dependency-kind entries whose
+  -- remaining dependents run dry go with the plan; anything still required
+  -- by a construct outside it is kept and reported below. Explicit
+  -- constructs aren't cascaded.
+  local delete_order, skipped = resolve_cascade(planned, targets)
+  
   -- 5) Build the full deletion plan. One ownership index for the whole
   -- transaction: every shared-file check becomes a hash lookup instead of a
   -- full database rescan per file (which dominated deletion time on large
