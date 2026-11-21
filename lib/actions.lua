@@ -1565,56 +1565,116 @@ function actions.transcend(flags)
 
 	local cfg = config.get()
 
-	-- Phase 1: Fetch all manifests in parallel to check for upgrades.
-	local items = {}
+    -- installed_info: the local half of every comparison, and the no-op
+	-- guard that keeps a database-less run from recording a phase receipt.
 	local installed_info = {}
 	for _, name in ipairs(installed) do
 		local cur = db.get(name)
-		if cur then
-			installed_info[name] = cur
-			items[#items + 1] = {
-				url = repo.manifest_url(name),
-				dest = path.join(cfg.tmp_dir, "transcend-" .. name .. "-" .. tostring(math.random(10000, 99999)) .. ".lua"),
-				_name = name,
-			}
-		end
+		if cur then installed_info[name] = cur end
 	end
-
-	if #items == 0 then
+	if next(installed_info) == nil then
 		log.info("no constructs have been provided")
 		return 0
 	end
 
-	-- Marked after the no-op guards above: a run that never checks anything
+	-- On older commits, zeta was incredibly slow on upgrades
+	-- so what? well it did deserve a rewrite
+	-- so this section focuses on explaining how it works
+
+	-- Phase 1: resolve remote versions.
+	--
+	-- Fast path: one index fetch answers every version question. The index
+	-- (the same one -Localize searches) carries name + version for every
+	-- construct, so an 800-construct sweep costs one request plus an
+	-- in-memory compare instead of 800 manifest downloads. Only names the
+	-- index does not know, and only candidates that really are behind, fetch
+	-- a full manifest -- and those are exactly what the install needs.
+	--
+	-- Slow path: a repository without index.lua falls back to the parallel
+	-- per-construct sweep -Transcend has always used, so indexless setups
+	-- lose nothing.
+	--
+	-- Marked after the no-op guard above: a run that never checks anything
 	-- records nothing and prints no receipt.
 	profile.mark("resolve")
-	local results = fetch.get_parallel(items, { label = "checking for constructs to transcend" })
 	local manifest_cache = {}
-	for i, result in ipairs(results) do
-		local name = items[i]._name
-		if result.dest then
-			local f = io.open(result.dest, "rb")
-			if f then
-				local src = f:read("*a")
-				f:close()
-				os.remove(result.dest)
-				local m, merr = manifest.load_string(src, repo.manifest_url(name))
-				if m then
-					local ok, cerr = manifest.check_name(m, name)
-					if ok then
-						manifest_cache[name] = m
+
+	local index = repo.fetch_index()
+	if index then
+		local versions = {}
+		for _, e in ipairs(index) do
+			if e.version and not versions[e.name] then
+				versions[e.name] = e.version
+			end
+		end
+
+		local candidates = {}
+		for _, name in ipairs(installed) do
+			local cur = installed_info[name]
+			local remote_ver = versions[name]
+			if cur and not remote_ver then
+				-- Not in the index: a stale index entry or a construct newer
+				-- than the index generation. The manifest is authoritative.
+				local m = repo.fetch_manifest(name)
+				if m then manifest_cache[name] = m end
+			elseif cur and vercmp.compare(cur.version, remote_ver) < 0 then
+				candidates[#candidates + 1] = name
+			end
+		end
+
+		-- Candidates need their full manifest anyway (payload url, sha256,
+		-- deps). Fetching it here also lets the manifest overrule the index
+		-- in the shared compare below, so a stale index can never invent or
+		-- mask an upgrade.
+		for _, name in ipairs(candidates) do
+			local m = repo.fetch_manifest(name)
+			if m then
+				manifest_cache[name] = m
+			else
+				log.warn(("could not fetch manifest for %s -- skipped"):format(name))
+			end
+		end
+	else
+		-- No index available: fetch every manifest in parallel, exactly as
+		-- -Transcend always has.
+		local items = {}
+		for _, name in ipairs(installed) do
+			if installed_info[name] then
+				items[#items + 1] = {
+					url = repo.manifest_url(name),
+					dest = path.join(cfg.tmp_dir, "transcend-" .. name .. "-" .. tostring(math.random(10000, 99999)) .. ".lua"),
+					_name = name,
+				}
+			end
+		end
+
+		local results = fetch.get_parallel(items, { label = "checking for constructs to transcend" })
+		for i, result in ipairs(results) do
+			local name = items[i]._name
+			if result.dest then
+				local f = io.open(result.dest, "rb")
+				if f then
+					local src = f:read("*a")
+					f:close()
+					os.remove(result.dest)
+					local m, merr = manifest.load_string(src, repo.manifest_url(name))
+					if m then
+						local ok, cerr = manifest.check_name(m, name)
+						if ok then
+							manifest_cache[name] = m
+						end
 					end
 				end
 			end
 		end
-	end
-	-- Multi-repo: the parallel pass only knows the first repository. Resolve
-	-- anything it missed (a package living in a later repository) serially so
-	-- -Transcend can still upgrade it.
-	for _, name in ipairs(installed) do
-		if not manifest_cache[name] then
-			local m = repo.fetch_manifest(name)
-			if m then manifest_cache[name] = m end
+		-- Multi-repo: the parallel pass only knows the first repository.
+		-- Resolve anything it missed (a package living in a later
+		-- repository) serially so -Transcend can still upgrade it.
+		for _, name in ipairs(installed) do
+			if installed_info[name] and not manifest_cache[name] then
+				local m = repo.fetch_manifest(name)
+				if m then manifest_cache[name] = m end
+			end
 		end
 	end
 
@@ -1647,9 +1707,7 @@ function actions.transcend(flags)
 	end
 	print("")
 
-	-- Description only: chronos already timestamps the generation itself and
-	-- `chronos list` shows it in the DATE column. Without chronos the transcend
-	-- still runs -- there is just no rollback point.
+    -- ZETA provide a description to chronos using this
 	local desc = ("pre-transcending of %d construct(s)"):format(#upgrades)
 
 	-- Same rule as -Provide: the prompt's think time belongs to no phase.
